@@ -1,0 +1,11 @@
+.env
+backend/.env
+backend/runtime/*.json
+backend/runtime/*.log
+backend/__pycache__/
+backend/**/__pycache__/
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
+frontend/*.tsbuildinfo
+*.pyc
