@@ -13,7 +13,7 @@ class VerificationResult:
 
 
 _BUYER = re.compile(
-    r"\b(looking for|need|seeking).{0,60}\b(agency|partner|vendor|consultant|service provider|solution provider|implementation partner|managed service)\b",
+    r"\b(looking for|need|seeking|recommend|searching for).{0,60}\b(agency|partner|vendor|consultant|service provider|solution provider|implementation partner|managed service)\b",
     re.IGNORECASE,
 )
 _JOB = re.compile(
