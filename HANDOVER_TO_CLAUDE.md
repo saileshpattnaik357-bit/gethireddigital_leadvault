@@ -237,10 +237,23 @@ The following passed before handover:
 - Frontend and backend returned HTTP `200`.
 - Rendered HTML contained the new workspace, template, export, and history controls.
 
+Post-handover Claude verification (2026-06-24):
+
+- ✅ Backend compiles without errors (Python 3.14).
+- ✅ Frontend typechecks without errors (Next.js/TypeScript).
+- ✅ All 17 regression tests passing:
+  - 8 final verifier tests (buyer intent recognition, recruitment/seller/educational rejection).
+  - 5 buying intent scoring tests.
+  - 3 export schema validation tests.
+  - 1 tenant isolation test.
+- ✅ Defect fixed: Added "recommend" and "searching for" to procurement trigger words.
+- ✅ Verified fix works: "Can anyone recommend a good SEO agency?" now correctly accepted.
+
 Known verification limitation:
 
-- The Codex in-app browser webview failed to attach during the final visual automation pass.
-- HTTP and rendered-control verification passed, but Claude should perform a fresh manual/browser UI walkthrough.
+- Computer-use browser automation request timed out (request_access on Google Chrome).
+- Full manual browser UI walkthrough via computer-use not completed.
+- API and programmatic testing confirmed; visual walkthrough recommended for future session.
 
 ## Truth Boundary
 

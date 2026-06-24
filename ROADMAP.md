@@ -19,12 +19,17 @@
 - Expandable run details and live operation status added.
 - API health checks and local runtime support added.
 - LinkedIn search recency updated to past-week.
+- **2026-06-24**: Fixed buyer-intent classifier to recognize "recommend" and "searching for" as procurement triggers.
+- **2026-06-24**: Added 17-test regression suite covering classifier, scoring, export schema, and tenant isolation.
+- **2026-06-24**: All regression tests passing. Backend compiles. Frontend typechecks.
 
 ## Outstanding
 
-- Harden Apify/public-web mining behavior.
-- Improve rejected-row explanations and filter tuning visibility.
+- Complete manual end-to-end browser UI walkthrough (computer-use access timed out).
+- Harden Apify/public-web mining behavior and error reporting.
+- Improve rejected-row explanations and classification confidence display.
 - Add durable background jobs and resumable progress for long mining runs.
+- Improve query deduplication and relevance ranking.
 
 ## Future Priorities
 

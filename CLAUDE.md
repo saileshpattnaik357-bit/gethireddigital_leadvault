@@ -374,37 +374,36 @@ node_modules\.bin\tsc.cmd --noEmit
 
 ## 8. Current Status
 
-LeadVaultAI is functional as a local prototype/application.
+LeadVaultAI is functional as a local prototype/application with verified regression tests.
 
 Working:
 
-- Backend imports and compiles.
-- API health route works.
-- Plan generation works.
-- ICP upload works.
-- Upload + Mine route works.
-- LinkedIn paste capture works.
-- Buying intent classification works for smoke-tested buyer/noise examples.
-- Frontend typecheck passes.
-- Frontend renders.
-- Frontend has the updated workflow UI.
-- Accepted/rejected CSV export works client-side.
-- Backend persistence stores exist for accepted exports and rejected audit rows.
+- Backend imports and compiles (Python 3.14).
+- All API routes respond (health, plan, upload, mine, linkedin-capture, tenants, runs, export).
+- Frontend renders and typechecks without errors (Next.js).
+- Client details form and ICP upload functional.
+- Mining brain generation working.
+- LinkedIn paste capture classification working with 17 automated regression tests.
+- Accepted/rejected CSV/XLSX export functional with exact schema preservation.
+- Backend persistence stores functional for specs, accepted exports, rejected audits.
+- Tenant-aware workspace switcher working.
 
-Verified smoke behavior:
+Verified behavior (via regression tests):
 
-- A real buyer procurement signal was accepted:
+- ✓ Procurement intent recognized:
+  - "Looking for an AI implementation partner"
+  - "Can anyone recommend a good SEO agency?" (fixed in commit 7dc1a86)
+  - "Seeking an implementation partner"
+  
+- ✓ Noise correctly rejected:
+  - Recruitment: "We are hiring a Python developer, 5+ years experience"
+  - Seller promo: "We help brands with AI. DM me for services"
+  - Thought leadership: "5 AI trends for 2026"
 
-```text
-Looking for an AI implementation partner for our SaaS RevOps workflow. Need external help deploying automation this quarter. Recommendations welcome.
-```
+Recent fixes:
 
-- Hiring and seller noise were rejected:
-
-```text
-We are hiring a Python developer, 5+ years experience. Send resume.
-We help brands with AI automation. DM me for services.
-```
+- **2026-06-24**: Fixed buyer-intent classifier to recognize "recommend" and "searching for" as procurement triggers (commit 7dc1a86).
+- **2026-06-24**: Added comprehensive regression test suite with 17 test cases covering classifier, scoring, and export schema.
 
 Important limitation:
 
