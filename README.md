@@ -15,6 +15,16 @@ LeadVault takes a client ICP, service list, positioning, website, and target aud
 
 LeadVault can operate independently and can also be called by DIGIX as an ecosystem module.
 
+## Claude Handover
+
+For a new Claude Code session, read:
+
+- `CLAUDE.md`
+- `HANDOVER_TO_CLAUDE.md`
+- `CLAUDE_TAKEOVER_PROMPT.md`
+
+The handover documents describe the verified implementation, exact export contract, known limitations, local run commands, and recommended next work.
+
 ## Local Backend
 
 ```bash

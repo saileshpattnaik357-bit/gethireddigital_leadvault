@@ -1,6 +1,8 @@
 # LeadVaultAI Project Memory
 
-Last updated: 2026-06-11
+Last updated: 2026-06-24
+
+For the current takeover state, also read `HANDOVER_TO_CLAUDE.md`. It supersedes stale status or roadmap statements in older sections of this file.
 
 This file is the permanent project memory for future Claude/Codex sessions. Read it before making changes. It explains what LeadVaultAI is, what has already been built, what must not be broken, and what should happen next.
 
@@ -187,11 +189,17 @@ Needs:
 - Accepted lead rows.
 - Rejected audit rows.
 - Accepted/rejected CSV export in UI.
+- Accepted/rejected XLSX export.
 - Buying Intent Agent.
 - Final verifier.
 - Accepted export persistence.
 - Rejected audit persistence.
 - Spec persistence.
+- Tenant discovery and workspace switcher.
+- Tenant-aware accepted/rejected run history.
+- Downloadable ICP CSV template.
+- Expandable history details.
+- Live operation status and error display.
 - API health check.
 - Frontend API status display.
 - Past-week LinkedIn search URL freshness.
@@ -414,22 +422,19 @@ Apify/public-web hooks exist, but live scraping reliability needs more hardening
 
 Immediate goals:
 
-- Make LeadVaultAI usable tonight for a real client.
-- Ensure ICP upload and client details both work.
-- Generate high-quality procurement queries.
-- Classify pasted/imported candidates accurately.
-- Export accepted leads in the exact legacy schema.
-- Show rejected rows for audit and filter tuning.
+- Perform a fresh manual browser walkthrough with a real client ICP.
+- Build classifier and export regression tests.
+- Harden provider-dependent live mining and its error reporting.
+- Improve query quality, deduplication, and rejected-row explanations.
+- Add durable background execution for long mining runs.
 
 Near-term goals:
 
-- Add saved run history UI.
-- Add tenant switcher.
-- Add sample ICP template download.
-- Improve Apify/public-web mining status visibility.
+- Improve Apify/public-web mining reliability.
 - Improve rejected audit explainability.
 - Make LinkedIn paste/import workflow smoother.
-- Harden the Buying Intent Agent.
+- Harden the Buying Intent Agent with a real regression corpus.
+- Move local persistence to SQLite before multi-user deployment.
 
 Long-term goals:
 
@@ -728,11 +733,11 @@ The earlier UI did not clearly allow client ICP upload and mining flow for a rea
 
 ### Phase 1: Local Usability Hardening
 
-- Add saved run history UI.
-- Add saved accepted/rejected audit viewer.
-- Add sample ICP template download.
-- Improve API-offline error display.
-- Add tenant switcher.
+- Saved run history UI completed.
+- Saved accepted/rejected audit viewer completed.
+- Sample ICP template download completed.
+- API status and operation error display completed.
+- Tenant switcher completed.
 - Add copy/open buttons for generated LinkedIn queries.
 - Add import CSV of LinkedIn posts.
 - Improve manual LinkedIn capture review.
@@ -837,7 +842,7 @@ Start with:
 4. Test client details -> generate brain.
 5. Test ICP upload -> generate brain.
 6. Test LinkedIn paste capture.
-7. Add saved run history UI.
-8. Improve live mining status/error visibility.
+7. Add automated regression tests for classification, tenant isolation, and exports.
+8. Harden live mining reliability, retries, dedupe, and source-level errors.
 
 The user wants a usable lead-mining tool first. Big agent architecture comes after the local workflow is reliable.
