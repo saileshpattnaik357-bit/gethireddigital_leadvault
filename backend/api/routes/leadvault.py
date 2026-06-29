@@ -70,6 +70,7 @@ class LeadVaultPlanRequest(BaseModel):
     customer_examples: list[str] = []
     founder_profile: str = ""
     target_audience: str = ""
+    lead_objective: str = ""
     notes: str = ""
     tenant_id: str = "default"
     use_llm: bool = False
@@ -91,6 +92,7 @@ class LinkedInCaptureRequest(BaseModel):
     query: str = "linkedin_capture"
     tenant_id: str = "default"
     max_results: int = 50
+    lead_objective: str = "agency_procurement"
 
 
 @router.get("/health")
@@ -110,6 +112,7 @@ async def plan(req: LeadVaultPlanRequest):
         customer_examples=req.customer_examples,
         founder_profile=req.founder_profile,
         target_audience=req.target_audience,
+        lead_objective=req.lead_objective,
         notes=req.notes,
         tenant_id=req.tenant_id,
     )
@@ -136,6 +139,7 @@ async def plan(req: LeadVaultPlanRequest):
 async def upload(
     file: UploadFile = File(...),
     tenant_id: str = Form("default"),
+    lead_objective: str = Form(""),
     use_llm: bool = Form(False),
     save: bool = Form(True),
 ):
@@ -157,6 +161,7 @@ async def upload(
         positioning=profile.get("positioning", ""),
         customer_examples=profile.get("customer_examples", []),
         founder_profile=profile.get("founder_profile", ""),
+        lead_objective=lead_objective or profile.get("lead_objective", ""),
         notes=profile.get("notes", ""),
         tenant_id=tenant_id,
     )
@@ -283,6 +288,7 @@ def mine(req: LeadVaultMineRequest):
         mining_mode=req.mining_mode,
         max_apify_queries=max(1, min(req.max_apify_queries, 25)),
         max_posts_per_query=max(1, min(req.max_posts_per_query, 25)),
+        lead_objective=req.lead_objective,
     )
 
 
@@ -296,6 +302,7 @@ async def mine_upload(
     mining_mode: str = Form("hybrid"),
     max_apify_queries: int = Form(10),
     max_posts_per_query: int = Form(10),
+    lead_objective: str = Form(""),
 ):
     if not confirmed:
         raise HTTPException(
@@ -326,6 +333,7 @@ async def mine_upload(
         mining_mode=mining_mode,
         max_apify_queries=max(1, min(max_apify_queries, 25)),
         max_posts_per_query=max(1, min(max_posts_per_query, 25)),
+        lead_objective=lead_objective or profile.get("lead_objective", ""),
     )
     result["summary"]["uploaded_rows"] = len(rows)
     result["summary"]["source_filename"] = file.filename
@@ -340,6 +348,7 @@ def linkedin_capture(req: LinkedInCaptureRequest):
         rows=req.rows,
         query=req.query,
         max_results=max(1, min(req.max_results, 100)),
+        lead_objective=req.lead_objective,
     )
 
 
@@ -349,6 +358,7 @@ async def linkedin_capture_upload(
     tenant_id: str = Form("default"),
     query: str = Form("linkedin_capture"),
     max_results: int = Form(50),
+    lead_objective: str = Form("agency_procurement"),
 ):
     raw = await file.read()
     try:
@@ -360,6 +370,7 @@ async def linkedin_capture_upload(
         rows=rows,
         query=query,
         max_results=max(1, min(max_results, 100)),
+        lead_objective=lead_objective,
     )
     result["summary"]["uploaded_rows"] = len(rows)
     result["summary"]["source_filename"] = file.filename

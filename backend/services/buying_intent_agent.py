@@ -126,6 +126,10 @@ def analyze_buying_intent(
         score += 20
         evidence.append("final_verifier_procurement_buyer")
         trace.append({"rule": "final_verifier_procurement_buyer", "weight": 20, "matched": True})
+    elif verification_category in {"HIRING_COMPANY", "RECRUITMENT_BUYER", "JOB_OPPORTUNITY", "FRACTIONAL_OPPORTUNITY"}:
+        score += 95
+        evidence.append(f"final_verifier_{verification_category.lower()}")
+        trace.append({"rule": f"final_verifier_{verification_category.lower()}", "weight": 95, "matched": True})
     elif verification_category in {"RECRUITMENT", "SELLER_PROMOTION", "EDUCATIONAL", "THOUGHT_LEADERSHIP", "NEWS"}:
         score -= 20
         negative_signals.append(f"final_verifier_{verification_category.lower()}")
@@ -133,7 +137,13 @@ def analyze_buying_intent(
 
     score = max(0, min(100, score))
     stage, priority, approval_required = _stage(score)
-    signal_type = signal_types[0] if signal_types else "unclear"
+    category_signal_types = {
+        "HIRING_COMPANY": "recruitment_client_hiring_demand",
+        "RECRUITMENT_BUYER": "recruitment_procurement",
+        "JOB_OPPORTUNITY": "candidate_job_opportunity",
+        "FRACTIONAL_OPPORTUNITY": "fractional_executive_opportunity",
+    }
+    signal_type = category_signal_types.get(verification_category or "", signal_types[0] if signal_types else "unclear")
     play, action = _recommended_play(stage, signal_type)
 
     return BuyingIntentResult(
