@@ -11,7 +11,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from services.buying_intent_agent import analyze_buying_intent
-from services.universal_engine import build_discovery_plan, build_universal_profile
+from services.universal_engine import OBJECTIVE_CONFIGS, build_discovery_plan, build_universal_profile, normalize_objective
 
 try:  # pragma: no cover - optional dependency guard
     from services.ai_service import AIService
@@ -105,10 +105,93 @@ NEGATIVE_FILTERS = [
     "trend",
 ]
 
+OBJECTIVE_SEED_BANK = {
+    "agency_procurement": UNIVERSAL_BUYER_SEEDS,
+    "fractional_executive": [
+        "fractional CMO",
+        "interim marketing leader",
+        "GTM advisor",
+        "growth consultant",
+        "RevOps consultant",
+        "marketing strategy consultant",
+    ],
+    "recruitment_clients": [
+        "urgent hiring support",
+        "recruitment agency",
+        "staffing partner",
+        "RPO provider",
+        "talent acquisition support",
+        "hiring multiple roles",
+    ],
+    "candidate_job_search": [
+        "job opening",
+        "open role",
+        "hiring now",
+        "apply now",
+        "remote job",
+        "career opportunity",
+    ],
+}
+
+OBJECTIVE_PATTERNS = {
+    "agency_procurement": BUYER_PATTERNS,
+    "fractional_executive": [
+        "looking for {term}",
+        "need {term}",
+        "seeking {term}",
+        "recommend {term}",
+        "need interim {term}",
+        "fractional {term} recommendation",
+    ],
+    "recruitment_clients": [
+        "we are hiring {term}",
+        "hiring {term}",
+        "urgent hiring {term}",
+        "need recruiters for {term}",
+        "looking for staffing partner {term}",
+        "need recruitment agency for {term}",
+    ],
+    "candidate_job_search": [
+        "hiring {term}",
+        "{term} job opening",
+        "{term} open role",
+        "{term} remote job",
+        "{term} apply now",
+        "{term} career opportunity",
+    ],
+}
+
+OBJECTIVE_NEGATIVE_FILTERS = {
+    "agency_procurement": NEGATIVE_FILTERS,
+    "fractional_executive": [*NEGATIVE_FILTERS, "full time executive role", "permanent cmo job", "leadership hiring only"],
+    "recruitment_clients": [
+        "staffing agency pitch",
+        "we provide staffing",
+        "candidate looking for job",
+        "resume attached",
+        "career advice",
+        "course",
+        "webinar",
+        "newsletter",
+    ],
+    "candidate_job_search": [
+        "agency pitch",
+        "we help companies hire",
+        "staffing services",
+        "resume writing service",
+        "career coach pitch",
+        "course",
+        "webinar",
+        "generic advice",
+    ],
+}
+
 
 @dataclass
 class LeadVaultSpec:
     tenant_id: str
+    lead_objective: str
+    objective_label: str
     company_name: str
     website: str
     services: list[str]
@@ -158,16 +241,21 @@ def _normalize_text(*values: Any) -> str:
     return " ".join(str(v) for v in values if v not in (None, "")).lower()
 
 
-def _service_seeds(services: list[str], icp: str, positioning: str, customer_examples: list[str], founder_profile: str, notes: str) -> list[str]:
+def _service_seeds(services: list[str], icp: str, positioning: str, customer_examples: list[str], founder_profile: str, notes: str, lead_objective: str) -> list[str]:
     corpus = _normalize_text(services, icp, positioning, customer_examples, founder_profile, notes)
     seeds: list[str] = []
-    for _, aliases, family_seeds in SERVICE_ALIAS_BANK:
-        if any(alias in corpus for alias in aliases):
-            seeds.extend(family_seeds)
-    return list(dict.fromkeys(seeds or UNIVERSAL_BUYER_SEEDS))
+    if lead_objective in {"candidate_job_search", "recruitment_clients"}:
+        seeds.extend(_split_values(services))
+        seeds.extend(_split_values(icp))
+    else:
+        for _, aliases, family_seeds in SERVICE_ALIAS_BANK:
+            if any(alias in corpus for alias in aliases):
+                seeds.extend(family_seeds)
+    objective_seeds = OBJECTIVE_SEED_BANK.get(lead_objective, UNIVERSAL_BUYER_SEEDS)
+    return list(dict.fromkeys([*seeds, *objective_seeds] or UNIVERSAL_BUYER_SEEDS))
 
 
-def _build_clusters(services: list[str], icp: str, positioning: str, customer_examples: list[str], founder_profile: str, notes: str) -> list[str]:
+def _build_clusters(services: list[str], icp: str, positioning: str, customer_examples: list[str], founder_profile: str, notes: str, lead_objective: str) -> list[str]:
     corpus = _normalize_text(services, icp, positioning, customer_examples, founder_profile, notes)
     clusters: list[str] = []
     for family, aliases, _ in SERVICE_ALIAS_BANK:
@@ -184,6 +272,7 @@ def _build_clusters(services: list[str], icp: str, positioning: str, customer_ex
         "implementation partner",
         "outsourcing signal",
     ])
+    clusters.extend(OBJECTIVE_CONFIGS.get(lead_objective, OBJECTIVE_CONFIGS["agency_procurement"])["positive_signals"])
     return sorted(dict.fromkeys(clusters or ["general agency search", "buyer procurement intent"]))
 
 
@@ -212,10 +301,10 @@ def _clean_query_phrase(phrase: str) -> str:
     return cleaned
 
 
-def _candidate_phrases(seed: str) -> list[str]:
+def _candidate_phrases(seed: str, lead_objective: str) -> list[str]:
     phrases: list[str] = []
     lower = seed.lower()
-    for pattern in BUYER_PATTERNS:
+    for pattern in OBJECTIVE_PATTERNS.get(lead_objective, BUYER_PATTERNS):
         if pattern.endswith(" partner") and lower.endswith(("partner", "agency", "consultant", "team")):
             continue
         if pattern.startswith("need external") and lower.startswith("external "):
@@ -224,11 +313,12 @@ def _candidate_phrases(seed: str) -> list[str]:
     return list(dict.fromkeys(phrases))
 
 
-def _build_phrase_bank(service_seeds: list[str], company_name: str, website: str, services: list[str]) -> tuple[list[str], list[str], list[str], list[dict[str, Any]]]:
+def _build_phrase_bank(service_seeds: list[str], company_name: str, website: str, services: list[str], lead_objective: str) -> tuple[list[str], list[str], list[str], list[dict[str, Any]]]:
     scores: list[dict[str, Any]] = []
     phrases: list[str] = []
-    for seed in list(dict.fromkeys([*service_seeds, *UNIVERSAL_BUYER_SEEDS])):
-        for phrase in _candidate_phrases(seed):
+    objective_seeds = OBJECTIVE_SEED_BANK.get(lead_objective, UNIVERSAL_BUYER_SEEDS)
+    for seed in list(dict.fromkeys([*service_seeds, *objective_seeds])):
+        for phrase in _candidate_phrases(seed, lead_objective):
             phrases.append(phrase)
             scores.append(_score_phrase(phrase, company_name, website, services))
 
@@ -238,7 +328,12 @@ def _build_phrase_bank(service_seeds: list[str], company_name: str, website: str
     )
     buyer_phrases = [item["phrase"] for item in ranked[:200]]
     linkedin_queries = buyer_phrases[:80]
-    google_queries = [f'site:linkedin.com/posts "{phrase}"' for phrase in buyer_phrases[:40]]
+    if lead_objective == "candidate_job_search":
+        google_queries = [f'"{phrase}"' for phrase in buyer_phrases[:40]]
+    elif lead_objective == "recruitment_clients":
+        google_queries = [f'site:linkedin.com/posts "{phrase}" OR site:linkedin.com/jobs "{phrase}"' for phrase in buyer_phrases[:40]]
+    else:
+        google_queries = [f'site:linkedin.com/posts "{phrase}"' for phrase in buyer_phrases[:40]]
     return buyer_phrases, linkedin_queries, google_queries, ranked
 
 
@@ -249,6 +344,7 @@ def _render_python_snippet(spec: LeadVaultSpec) -> str:
     return "\n".join([
         "# LeadVault generated query bank",
         f"# Company: {spec.company_name or 'N/A'}",
+        f"# Objective: {spec.lead_objective} ({spec.objective_label})",
         f"# Generated: {spec.generated_at_utc}",
         "",
         f"BUYER_INTENT_CLUSTERS = {list_block(spec.buyer_clusters)}",
@@ -276,9 +372,13 @@ def build_leadvault_spec(
     target_audience: str = "",
     notes: str = "",
     tenant_id: str = "default",
+    lead_objective: str = "",
 ) -> LeadVaultSpec:
     services_list = _split_values(services or [])
     examples_list = _split_values(customer_examples or [])
+    objective_corpus = _normalize_text(company_name, website, services_list, geography, icp, positioning, examples_list, founder_profile, target_audience, notes)
+    normalized_objective = normalize_objective(lead_objective, objective_corpus)
+    objective_label = OBJECTIVE_CONFIGS[normalized_objective]["label"]
     profile = build_universal_profile(
         company_name=company_name,
         website=website,
@@ -288,6 +388,7 @@ def build_leadvault_spec(
         positioning=positioning,
         customer_examples=examples_list,
         founder_profile=founder_profile,
+        lead_objective=normalized_objective,
     )
     discovery_plan = build_discovery_plan(
         company_name=company_name,
@@ -298,15 +399,18 @@ def build_leadvault_spec(
         positioning=positioning,
         customer_examples=examples_list,
         founder_profile=founder_profile,
+        lead_objective=normalized_objective,
     )
-    seeds = _service_seeds(services_list, icp, positioning, examples_list, founder_profile, notes)
-    buyer_phrases, linkedin_queries, google_queries, query_scores = _build_phrase_bank(seeds, company_name, website, services_list)
+    seeds = _service_seeds(services_list, icp, positioning, examples_list, founder_profile, notes, normalized_objective)
+    buyer_phrases, linkedin_queries, google_queries, query_scores = _build_phrase_bank(seeds, company_name, website, services_list, normalized_objective)
     buying_intent_preview = analyze_buying_intent(
         " ".join([company_name, website, icp, positioning, target_audience, notes, " ".join(services_list)]),
         account={"company": company_name, "website": website, "industry": " ".join(services_list), "source": "leadvault"},
     )
     spec = LeadVaultSpec(
         tenant_id=tenant_id,
+        lead_objective=normalized_objective,
+        objective_label=objective_label,
         company_name=company_name,
         website=website,
         services=services_list,
@@ -319,11 +423,11 @@ def build_leadvault_spec(
         notes=notes,
         profile=profile.__dict__,
         discovery_plan=discovery_plan.__dict__,
-        buyer_clusters=_build_clusters(services_list, icp, positioning, examples_list, founder_profile, notes),
+        buyer_clusters=_build_clusters(services_list, icp, positioning, examples_list, founder_profile, notes, normalized_objective),
         linkedin_queries=linkedin_queries,
         google_queries=google_queries,
         buyer_phrases=buyer_phrases,
-        negative_filters=list(dict.fromkeys(NEGATIVE_FILTERS)),
+        negative_filters=list(dict.fromkeys(OBJECTIVE_NEGATIVE_FILTERS.get(normalized_objective, NEGATIVE_FILTERS))),
         query_scores=query_scores,
         buying_intent_preview=buying_intent_preview.__dict__,
         generated_at_utc=datetime.now(timezone.utc).isoformat(),
@@ -344,6 +448,8 @@ async def build_leadvault_spec_with_llm(spec: LeadVaultSpec) -> LeadVaultSpec:
             "icp": spec.icp,
             "positioning": spec.positioning,
             "target_audience": spec.target_audience,
+            "lead_objective": spec.lead_objective,
+            "objective_label": spec.objective_label,
             "buyer_clusters": spec.buyer_clusters,
             "linkedin_queries": spec.linkedin_queries[:40],
             "google_queries": spec.google_queries[:20],
@@ -352,8 +458,8 @@ async def build_leadvault_spec_with_llm(spec: LeadVaultSpec) -> LeadVaultSpec:
             messages=[{
                 "role": "user",
                 "content": (
-                    "Refine this LeadVault buyer-intent query bank. Keep phrases short, customer-written, "
-                    "and focused on external agency/partner/vendor demand. Return strict JSON with keys "
+                    "Refine this LeadVault query bank for the stated lead-mining objective. Keep phrases short, "
+                    "customer-written, and focused on high-intent opportunities. Return strict JSON with keys "
                     "buyer_clusters, linkedin_queries, google_queries, buyer_phrases, negative_filters. "
                     f"Context: {json.dumps(context, ensure_ascii=False)}"
                 ),
@@ -412,6 +518,7 @@ def aggregate_icp_profile(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "positioning": ["positioning", "value proposition", "position", "about", "summary"],
         "customer_examples": ["customer examples", "examples", "clients", "case studies", "references"],
         "founder_profile": ["founder profile", "founder", "bio", "about founder"],
+        "lead_objective": ["lead objective", "objective", "goal", "use case", "mining objective", "campaign objective"],
         "notes": ["notes", "details", "additional info", "observations", "requirements"],
     }
     collected: dict[str, list[str]] = {key: [] for key in aliases}
@@ -433,6 +540,7 @@ def aggregate_icp_profile(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "positioning": " | ".join(dict.fromkeys(collected["positioning"])),
         "customer_examples": _split_values(collected["customer_examples"]),
         "founder_profile": " | ".join(dict.fromkeys(collected["founder_profile"])),
+        "lead_objective": next((item for item in collected["lead_objective"] if item), ""),
         "notes": " | ".join(dict.fromkeys(collected["notes"])),
         "row_count": len(rows),
     }

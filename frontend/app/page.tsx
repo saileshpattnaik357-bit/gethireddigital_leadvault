@@ -6,6 +6,8 @@ import { Brain, CheckCircle2, Copy, Download, FileSpreadsheet, Play, Plus, Radar
 const API = process.env.NEXT_PUBLIC_LEADVAULT_API ?? 'http://localhost:8000'
 
 interface LeadVaultSpec {
+  lead_objective?: string
+  objective_label?: string
   company_name: string
   website: string
   services: string[]
@@ -82,10 +84,18 @@ const leadColumns = [
   'Notes',
 ]
 
+const leadObjectiveOptions = [
+  { value: 'agency_procurement', label: 'Agency / Vendor Buyer Leads', hint: 'Find companies seeking agencies, consultants, vendors, implementation partners, or outsourced support.' },
+  { value: 'recruitment_clients', label: 'Recruitment / Staffing Client Leads', hint: 'Find companies hiring or needing recruiters, staffing partners, or RPO support.' },
+  { value: 'candidate_job_search', label: 'Candidate / Job Opportunity Mining', hint: 'Find job openings and hiring posts for a candidate profile.' },
+  { value: 'fractional_executive', label: 'Fractional CMO / Executive Consulting', hint: 'Find companies seeking fractional leaders, GTM advisors, RevOps consultants, or growth executives.' },
+]
+
 export default function LeadVaultPage() {
   const [apiState, setApiState] = useState<ApiState>('checking')
   const [form, setForm] = useState({
     tenant_id: 'default',
+    lead_objective: 'agency_procurement',
     company_name: '',
     website: '',
     services: '',
@@ -160,7 +170,7 @@ export default function LeadVaultPage() {
     setForm({
       tenant_id: `client-${new Date().toISOString().slice(0, 10)}`,
       company_name: '', website: '', services: '', geography: '', icp: '',
-      positioning: '', customer_examples: '', founder_profile: '',
+      positioning: '', customer_examples: '', founder_profile: '', lead_objective: 'agency_procurement',
     })
     setSpec(null)
     setResult(null)
@@ -210,7 +220,7 @@ export default function LeadVaultPage() {
           services: lines(form.services),
           customer_examples: lines(form.customer_examples),
           target_audience: form.icp,
-          notes: 'Only accept external agency, consultant, vendor, RFP, implementation partner, outsourcing, or managed service procurement intent. Reject hiring, seller promotion, jobs, and educational content.',
+          notes: objectiveInstruction(form.lead_objective),
           use_llm: useLlm,
           save: true,
         }),
@@ -242,6 +252,7 @@ export default function LeadVaultPage() {
       const payload = new FormData()
       payload.append('file', file)
       payload.append('tenant_id', form.tenant_id)
+      payload.append('lead_objective', form.lead_objective)
       payload.append('save', 'true')
       payload.append('use_llm', String(useLlm))
       const res = await fetch(`${API}/api/leadvault/upload`, { method: 'POST', body: payload })
@@ -280,6 +291,7 @@ export default function LeadVaultPage() {
         positioning: spec?.positioning || form.positioning,
         customer_examples: spec?.customer_examples?.length ? spec.customer_examples : lines(form.customer_examples),
         founder_profile: spec?.founder_profile || form.founder_profile,
+        lead_objective: spec?.lead_objective || form.lead_objective,
         confirmed: true,
         mining_mode: mode,
         max_apify_queries: boundedNumber(maxApifyQueries, 1, 25, 10),
@@ -324,6 +336,7 @@ export default function LeadVaultPage() {
       const payload = new FormData()
       payload.append('file', icpFile)
       payload.append('tenant_id', form.tenant_id)
+      payload.append('lead_objective', spec?.lead_objective || form.lead_objective)
       payload.append('confirmed', 'true')
       payload.append('live_web', String(liveWeb))
       payload.append('mining_mode', mode)
@@ -363,6 +376,7 @@ export default function LeadVaultPage() {
           posts_text: captureText,
           query: 'manual_linkedin_capture',
           max_results: boundedNumber(maxResults, 1, 100, 25),
+          lead_objective: spec?.lead_objective || form.lead_objective,
         }),
       })
       const data = await res.json()
@@ -397,6 +411,7 @@ export default function LeadVaultPage() {
       positioning: stringValue(profile.positioning) || current.positioning,
       customer_examples: arrayText(profile.customer_examples) || current.customer_examples,
       founder_profile: stringValue(profile.founder_profile) || current.founder_profile,
+      lead_objective: stringValue(profile.lead_objective) || current.lead_objective,
     }))
   }
 
@@ -447,6 +462,13 @@ export default function LeadVaultPage() {
         <div className="panel raised">
           <div className="panel-title"><Brain size={17} /> Client Details</div>
           <Input label="Tenant / Client Workspace" placeholder="acme-ai-agency" value={form.tenant_id} onChange={(v) => setForm({ ...form, tenant_id: v })} />
+          <label>
+            <span>Lead Mining Objective</span>
+            <select value={form.lead_objective} onChange={(event) => setForm({ ...form, lead_objective: event.target.value })}>
+              {leadObjectiveOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <p className="muted objective-hint">{leadObjectiveOptions.find((option) => option.value === form.lead_objective)?.hint}</p>
           <div className="grid two no-margin">
             <Input label="Client Company" placeholder="Client name" value={form.company_name} onChange={(v) => setForm({ ...form, company_name: v })} />
             <Input label="Website" placeholder="https://client.com" value={form.website} onChange={(v) => setForm({ ...form, website: v })} />
@@ -482,6 +504,7 @@ export default function LeadVaultPage() {
             <Metric label="Google/RFP" value={spec?.google_queries.length ?? 0} />
             <Metric label="Buyer Phrases" value={spec?.buyer_phrases.length ?? 0} />
           </div>
+          {spec?.objective_label ? <p className="muted">Active objective: {spec.objective_label}</p> : null}
 
           <label className="confirm">
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
@@ -533,7 +556,7 @@ export default function LeadVaultPage() {
       <section className="grid two">
         <div className="panel">
           <div className="panel-title"><Radar size={17} /> LinkedIn Paste Capture</div>
-          <p className="muted">For LinkedIn, paste copied posts/search-result text here. LeadVault will classify buyer vs hiring/seller/education and export only real procurement rows.</p>
+          <p className="muted">For LinkedIn, paste copied posts/search-result text here. LeadVault classifies rows according to the selected objective, then exports only valid matches.</p>
           <Textarea label="LinkedIn posts or rows" value={captureText} onChange={setCaptureText} rows={8} placeholder="Paste LinkedIn post text here..." />
           <div className="actions">
             <button onClick={analyzeCapture} disabled={mining || !captureText.trim()}><Radar size={14} /> Analyze Capture</button>
@@ -603,6 +626,16 @@ function lines(value: string) {
   return value.split('\n').map((item) => item.trim()).filter(Boolean)
 }
 
+function objectiveInstruction(objective: string) {
+  const instructions: Record<string, string> = {
+    agency_procurement: 'Only accept external agency, consultant, vendor, RFP, implementation partner, outsourcing, or managed service procurement intent. Reject hiring, seller promotion, jobs, and educational content.',
+    recruitment_clients: 'Accept companies showing active hiring demand or asking for recruitment, staffing, RPO, or talent acquisition support. Reject staffing agency self-promotion, candidate self-promotion, education, and generic news.',
+    candidate_job_search: 'Accept real job openings, open roles, hiring manager posts, and apply-now career opportunities that match the candidate ICP. Reject agency pitches, career advice, courses, and candidate self-promotion.',
+    fractional_executive: 'Accept companies seeking fractional executives, interim leaders, GTM advisors, RevOps consultants, growth consultants, or executive advisory support. Reject full-time job posts, consultant self-promotion, education, and thought leadership.',
+  }
+  return instructions[objective] ?? instructions.agency_procurement
+}
+
 function boundedNumber(value: string, min: number, max: number, fallback: number) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return fallback
@@ -638,8 +671,8 @@ function downloadCsv(filename: string, rows: Array<Record<string, unknown>>, pre
 }
 
 function downloadIcpTemplate() {
-  const columns = ['company_name', 'website', 'services', 'icp', 'geography', 'positioning', 'customer_examples', 'founder_profile', 'notes']
-  const example = ['Example Client', 'https://example.com', 'AI implementation; RevOps consulting', 'CMOs and RevOps leaders at B2B SaaS companies', 'US; UK', 'External implementation partner for growth teams', 'Series A SaaS; Healthcare technology', 'https://linkedin.com/in/founder', 'Prioritize active vendor and agency searches']
+  const columns = ['company_name', 'website', 'lead_objective', 'services', 'icp', 'geography', 'positioning', 'customer_examples', 'founder_profile', 'notes']
+  const example = ['Example Client', 'https://example.com', 'agency_procurement', 'AI implementation; RevOps consulting', 'CMOs and RevOps leaders at B2B SaaS companies', 'US; UK', 'External implementation partner for growth teams', 'Series A SaaS; Healthcare technology', 'https://linkedin.com/in/founder', 'Use agency_procurement, recruitment_clients, candidate_job_search, or fractional_executive']
   const csv = [columns, example].map((row) => row.map(csvValue).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)

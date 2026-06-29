@@ -105,6 +105,7 @@ def aggregate_mining_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "positioning": pick("positioning", "value proposition", "notes", "gtm positioning"),
         "customer_examples": collect("customer examples", "sample clients", "industries", "industry"),
         "founder_profile": pick("founder", "founder profile"),
+        "lead_objective": pick("lead objective", "objective", "goal", "use case", "mining objective", "campaign objective"),
     }
 
 
@@ -320,7 +321,7 @@ def _linkedin_search_urls(queries: list[str]) -> list[dict[str, str]]:
     return urls
 
 
-def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: Any, tenant_id: str) -> dict[str, Any]:
+def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: Any, tenant_id: str, lead_objective: str) -> dict[str, Any]:
     now = datetime.now(timezone.utc).date().isoformat()
     return {
         "Date Added": now,
@@ -345,6 +346,7 @@ def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: 
         "Ajroni Offer": intent.recommended_play,
         "Notes": intent.next_action,
         "tenant_id": tenant_id,
+        "lead_objective": lead_objective,
         "category": classification.category,
         "intent_score": intent.intent_score,
         "buying_stage": intent.buying_stage,
@@ -352,7 +354,7 @@ def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: 
     }
 
 
-def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_results: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_results: int, lead_objective: str = "agency_procurement") -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -361,17 +363,18 @@ def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_
         if key in seen:
             continue
         seen.add(key)
-        classification = verify_post(candidate.text)
+        classification = verify_post(candidate.text, lead_objective=lead_objective)
         intent = analyze_buying_intent(
             candidate.text,
             account={"company": candidate.title, "website": candidate.url, "source": candidate.source},
             verification_category=classification.category,
         )
         if classification.should_export and intent.intent_score >= 60:
-            accepted.append(_candidate_to_lead(candidate, classification, intent, tenant_id))
+            accepted.append(_candidate_to_lead(candidate, classification, intent, tenant_id, lead_objective))
         else:
             rejected.append({
                 "tenant_id": tenant_id,
+                "lead_objective": lead_objective,
                 "text": candidate.text,
                 "query": candidate.query,
                 "source": candidate.source,
@@ -417,6 +420,7 @@ def run_leadvault_mining(
     mining_mode: str = "hybrid",
     max_apify_queries: int = 10,
     max_posts_per_query: int = 10,
+    lead_objective: str = "",
 ) -> dict[str, Any]:
     spec = build_leadvault_spec(
         tenant_id=tenant_id,
@@ -428,6 +432,7 @@ def run_leadvault_mining(
         positioning=positioning,
         customer_examples=customer_examples or [],
         founder_profile=founder_profile,
+        lead_objective=lead_objective,
     )
     queries = list(dict.fromkeys([*spec.google_queries, *spec.buyer_phrases, *spec.linkedin_queries]))
     apify_queries = list(dict.fromkeys(spec.linkedin_queries + spec.buyer_phrases))
@@ -453,7 +458,7 @@ def run_leadvault_mining(
             if len(candidates) >= max_results * 2:
                 break
 
-    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results)
+    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, spec.lead_objective)
     _persist_mining_rows(tenant_id, accepted, rejected, "mined")
 
     return {
@@ -474,6 +479,8 @@ def run_leadvault_mining(
             "mining_mode": mode,
             "max_apify_queries": max_apify_queries,
             "max_posts_per_query": max_posts_per_query,
+            "lead_objective": spec.lead_objective,
+            "objective_label": spec.objective_label,
         },
     }
 
@@ -521,10 +528,11 @@ def run_linkedin_capture_mining(
     rows: list[dict[str, Any]] | None = None,
     query: str = "linkedin_capture",
     max_results: int = 50,
+    lead_objective: str = "agency_procurement",
 ) -> dict[str, Any]:
     candidates = parse_linkedin_capture_rows(rows or [], default_query=query)
     candidates.extend(parse_linkedin_capture_text(posts_text, default_query=query))
-    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results)
+    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, lead_objective)
     _persist_mining_rows(tenant_id, accepted, rejected, "linkedin")
     return {
         "status": "success",
@@ -536,5 +544,6 @@ def run_linkedin_capture_mining(
             "accepted": len(accepted),
             "rejected": len(rejected),
             "live_web": False,
+            "lead_objective": lead_objective,
         },
     }
