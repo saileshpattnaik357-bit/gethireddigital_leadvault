@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import base64
 import re
 import urllib.parse
 import urllib.request
@@ -26,6 +27,14 @@ BUYER_SENTENCE = re.compile(
 )
 TAG_RE = re.compile(r"<[^>]+>")
 LINK_RE = re.compile(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+BING_LINK_RE = re.compile(
+    r'<li[^>]+class="[^"]*\bb_algo\b[^"]*"[^>]*>.*?<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+GENERIC_HTTP_LINK_RE = re.compile(
+    r'<a[^>]+href="(https?://[^"#]+)"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
 LINKEDIN_TEXT_KEYS = (
     "text",
     "postText",
@@ -276,23 +285,82 @@ def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_p
     return candidates, report
 
 
+def _search_pages(query: str) -> list[tuple[str, str]]:
+    encoded = urllib.parse.urlencode({"q": query})
+    return [
+        ("duckduckgo", "https://duckduckgo.com/html/?" + encoded),
+        ("bing", "https://www.bing.com/search?" + encoded),
+    ]
+
+
+def _normalize_search_url(raw_url: str) -> str:
+    url = html.unescape(urllib.parse.unquote(raw_url))
+    if "uddg=" in url:
+        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        url = parsed.get("uddg", [url])[0]
+    if "bing.com/ck/a" in url:
+        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        for key in ("u", "url"):
+            value = parsed.get(key, [""])[0]
+            if value:
+                if value.startswith("a1"):
+                    try:
+                        padded = value[2:] + "=" * (-len(value[2:]) % 4)
+                        return base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                return urllib.parse.unquote(value)
+    return url
+
+
+def _is_useful_search_url(url: str) -> bool:
+    lowered = url.lower()
+    blocked_hosts = (
+        "duckduckgo.com",
+        "bing.com",
+        "microsoft.com",
+        "go.microsoft.com",
+        "account.microsoft.com",
+        "support.microsoft.com",
+        "privacy.microsoft.com",
+        "javascript:",
+    )
+    return lowered.startswith("http") and not any(host in lowered for host in blocked_hosts)
+
+
+def _extract_search_links(page: str) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    for pattern in (LINK_RE, BING_LINK_RE, GENERIC_HTTP_LINK_RE):
+        for raw_url, raw_title in pattern.findall(page):
+            url = _normalize_search_url(raw_url)
+            title = _clean_html(raw_title)
+            if url and title and _is_useful_search_url(url):
+                links.append((url, title))
+    deduped: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for url, title in links:
+        key = url.lower().rstrip("/")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((url, title))
+    return deduped
+
+
 def _duckduckgo_candidates(query: str, limit: int) -> list[MiningCandidate]:
-    search_url = "https://duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
-    try:
-        page = _open_url(search_url)
-    except Exception:
-        return []
+    pages: list[tuple[str, str]] = []
+    for source, url in _search_pages(query):
+        try:
+            pages.append((source, _open_url(url, timeout=5)))
+        except Exception:
+            continue
 
     candidates: list[MiningCandidate] = []
-    for raw_url, raw_title in LINK_RE.findall(page):
-        url = urllib.parse.unquote(raw_url)
-        title = _clean_html(raw_title)
-        if "uddg=" in url:
-            parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-            url = parsed.get("uddg", [url])[0]
-        candidates.append(MiningCandidate(text=title, query=query, source="duckduckgo", url=url, title=title))
-        if len(candidates) >= limit:
-            break
+    for source, page in pages:
+        for url, title in _extract_search_links(page):
+            candidates.append(MiningCandidate(text=title, query=query, source=source, url=url, title=title))
+            if len(candidates) >= limit:
+                return candidates
     return candidates
 
 
@@ -319,6 +387,28 @@ def _linkedin_search_urls(queries: list[str]) -> list[dict[str, str]]:
             "source": "linkedin_search_url",
         })
     return urls
+
+
+def _public_web_query_bank(spec: Any) -> list[str]:
+    weak_terms = re.compile(r"\b(anyone know|agency recommendations|trusted agency|team to handle this)\b", re.I)
+    strong_terms = re.compile(r"\b(looking for|need|seeking|recommend|rfp|rfq|vendor|consultant|partner|hiring|job opening|open role)\b", re.I)
+    queries: list[str] = []
+    for query in [*spec.linkedin_queries, *spec.buyer_phrases, *spec.google_queries]:
+        if weak_terms.search(query):
+            continue
+        if not strong_terms.search(query):
+            continue
+        queries.append(query)
+    deduped = list(dict.fromkeys(queries or [*spec.linkedin_queries, *spec.buyer_phrases, *spec.google_queries]))
+
+    def rank(query: str) -> tuple[int, str]:
+        if re.search(r"\b(looking for|need|seeking)\b", query, re.I):
+            return (0, query)
+        if re.search(r"\b(recommend|rfp|rfq|vendor evaluation)\b", query, re.I):
+            return (1, query)
+        return (2, query)
+
+    return sorted(deduped, key=rank)
 
 
 def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: Any, tenant_id: str, lead_objective: str) -> dict[str, Any]:
@@ -435,6 +525,7 @@ def run_leadvault_mining(
         lead_objective=lead_objective,
     )
     queries = list(dict.fromkeys([*spec.google_queries, *spec.buyer_phrases, *spec.linkedin_queries]))
+    public_web_queries = _public_web_query_bank(spec)
     apify_queries = list(dict.fromkeys(spec.linkedin_queries + spec.buyer_phrases))
     candidates: list[MiningCandidate] = []
     apify_report: list[dict[str, Any]] = []
@@ -449,8 +540,8 @@ def run_leadvault_mining(
         candidates.extend(apify_candidates)
 
     if live_web and mode in {"public_web", "web", "hybrid"}:
-        per_query = max(1, min(4, max_results // max(1, min(len(queries), 8))))
-        for query in queries[:8]:
+        per_query = max(1, min(4, max_results // max(1, min(len(public_web_queries), 8))))
+        for query in public_web_queries[:8]:
             seeds = _duckduckgo_candidates(query, per_query)
             candidates.extend(seeds)
             for seed in seeds[:2]:
