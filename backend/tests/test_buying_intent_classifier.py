@@ -62,6 +62,66 @@ class TestFinalVerifier:
         assert result.category == "SELLER_PROMOTION"
         assert result.should_export is False
 
+    def test_accept_partner_search(self):
+        """Should accept partner search variants."""
+        result = verify_post("Looking for a partner to help with our AI implementation.")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
+    def test_accept_fractional_cmo(self):
+        """Should accept fractional CMO requests when context is fractional executive."""
+        result = verify_post("Looking for a fractional cmo to help with our marketing strategy.", lead_objective="fractional_executive")
+        assert result.category == "FRACTIONAL_OPPORTUNITY"
+        assert result.should_export is True
+
+    def test_accept_managed_services(self):
+        """Should accept managed services procurement."""
+        result = verify_post("Seeking a managed service provider for our infrastructure needs.")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
+    def test_accept_recommendation_variants(self):
+        """Should accept recommendation request variants."""
+        result = verify_post("Can anyone recommend a consultant for our sales process?")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
+    def test_reject_job_opening_variants(self):
+        """Should reject various job opening formats."""
+        result = verify_post("We're hiring now: React developer wanted, 3+ years required.")
+        assert result.category == "RECRUITMENT"
+        assert result.should_export is False
+
+    def test_reject_vendor_pitch(self):
+        """Should reject vendor self-promotion pitches."""
+        result = verify_post("We help companies with sales automation. Book a call with us today!")
+        assert result.category == "SELLER_PROMOTION"
+        assert result.should_export is False
+
+    def test_reject_educational_variants(self):
+        """Should reject educational content variants."""
+        result = verify_post("Best practices for building marketing strategies: Learn how successful companies do it.")
+        assert result.category == "EDUCATIONAL"
+        assert result.should_export is False
+
+    def test_accept_external_vendor_need(self):
+        """Should accept posts about needing external vendor support."""
+        result = verify_post("We need an agency partner for our digital marketing strategy.")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
+    def test_accept_solution_provider_search(self):
+        """Should accept solution provider searches."""
+        result = verify_post("Looking for a solution provider to help implement our new system.")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
+    def test_accept_service_provider_search(self):
+        """Should accept service provider searches."""
+        result = verify_post("Seeking a service provider for our consulting needs.")
+        assert result.category == "PROCUREMENT_BUYER"
+        assert result.should_export is True
+
 
 class TestBuyingIntentScoring:
     """Test the buying intent scoring system."""
