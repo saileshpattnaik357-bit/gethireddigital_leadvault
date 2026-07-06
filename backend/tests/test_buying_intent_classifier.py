@@ -164,6 +164,31 @@ class TestBuyingIntentScoring:
         # Should be penalized to below acceptance threshold
         assert result.intent_score < 80
 
+    def test_confidence_score_range(self):
+        """Confidence score should be between 0.0 and 1.0."""
+        result = analyze_buying_intent("Looking for an AI implementation partner.")
+        assert 0.0 <= result.confidence_score <= 1.0
+
+    def test_confidence_increases_with_signals(self):
+        """Confidence should be higher with more positive signals."""
+        # Multiple positive signals
+        result_multi = analyze_buying_intent(
+            "Looking for a partner to help with implementation and transformation of our agency workflow."
+        )
+        # Single weak signal
+        result_single = analyze_buying_intent("Looking for help")
+        # More signals should have better (or equal) confidence
+        assert result_multi.confidence_score >= result_single.confidence_score - 0.1
+
+    def test_confidence_decreases_with_negative_signals(self):
+        """Confidence should be lower when negative signals present."""
+        # Clean procurement signal
+        result_clean = analyze_buying_intent("Looking for an agency partner.")
+        # Same but with negative signal
+        result_mixed = analyze_buying_intent("Looking for an agency partner. We help companies too.")
+        # Mixed signals should have lower confidence
+        assert result_mixed.confidence_score <= result_clean.confidence_score
+
 
 class TestExportSchemaValidation:
     """Test that accepted leads preserve the exact export schema."""

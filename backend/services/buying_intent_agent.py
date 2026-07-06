@@ -19,6 +19,7 @@ class BuyingIntentResult:
     approval_required: bool
     explainability_trace: list[dict[str, Any]]
     scored_at_utc: str
+    confidence_score: float = 0.5  # 0.0 to 1.0, confidence in the classification
 
 
 POSITIVE_RULES: list[tuple[str, int, str, re.Pattern[str]]] = [
@@ -129,6 +130,37 @@ def _stage(score: int) -> tuple[str, str, bool]:
     return "cold_or_noise", "low", False
 
 
+def _calculate_confidence(evidence: list[str], negative_signals: list[str], score: int, text_length: int) -> float:
+    """Calculate confidence in the classification (0.0 to 1.0)."""
+    confidence = 0.5
+
+    # More positive signals = higher confidence
+    signal_count_boost = min(len(evidence) * 0.1, 0.3)
+    confidence += signal_count_boost
+
+    # Fewer negative signals = higher confidence
+    if negative_signals:
+        signal_conflict_penalty = min(len(negative_signals) * 0.08, 0.25)
+        confidence -= signal_conflict_penalty
+
+    # Strong scores (hot/active_research) = higher confidence
+    if score >= 80:
+        confidence += 0.15
+    elif score >= 60:
+        confidence += 0.10
+    elif score < 35:
+        confidence -= 0.10
+
+    # Longer text generally means more context = higher confidence
+    if text_length > 200:
+        confidence += 0.10
+    elif text_length < 50:
+        confidence -= 0.05
+
+    # Clamp to 0.0-1.0 range
+    return max(0.0, min(1.0, confidence))
+
+
 def _recommended_play(stage: str, signal_type: str) -> tuple[str, str]:
     if stage == "hot":
         return "high_intent_founder_led_outreach", "research account, enrich decision makers, draft 1:1 outreach, request approval"
@@ -197,6 +229,8 @@ def analyze_buying_intent(
     signal_type = category_signal_types.get(verification_category or "", signal_types[0] if signal_types else "unclear")
     play, action = _recommended_play(stage, signal_type)
 
+    confidence = _calculate_confidence(evidence, negative_signals, score, len(body))
+
     return BuyingIntentResult(
         intent_score=score,
         buying_stage=stage,
@@ -209,6 +243,7 @@ def analyze_buying_intent(
         approval_required=approval_required,
         explainability_trace=trace,
         scored_at_utc=datetime.now(timezone.utc).isoformat(),
+        confidence_score=confidence,
     )
 
 
