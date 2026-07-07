@@ -10,6 +10,11 @@ from openpyxl import Workbook
 from pydantic import BaseModel
 
 from services.accepted_export_store import latest_accepted_export, list_accepted_exports
+from services.autonomous_runner import run_autonomous_pipeline, start_autonomous_job
+from services.background_jobs import get_job, list_jobs
+from services.credential_diagnostics import provider_diagnostics
+from services.crm_sync_store import list_crm_syncs, sync_leads_to_crm
+from services.memory_store import search_memory
 from services.rejected_audit_store import latest_rejected_audit, list_rejected_audits
 from services.leadvault_agent import (
     aggregate_icp_profile,
@@ -95,9 +100,26 @@ class LinkedInCaptureRequest(BaseModel):
     lead_objective: str = "agency_procurement"
 
 
+class CrmSyncRequest(BaseModel):
+    tenant_id: str = "default"
+    provider: str = "local"
+    rows: list[dict[str, Any]] = []
+
+
+class MemorySearchRequest(BaseModel):
+    tenant_id: str = "default"
+    query: str = ""
+    limit: int = 10
+
+
 @router.get("/health")
 def health():
     return {"status": "ok", "engine": "leadvault"}
+
+
+@router.get("/diagnostics")
+def diagnostics():
+    return provider_diagnostics()
 
 
 @router.post("/plan")
@@ -197,7 +219,21 @@ def runs(tenant_id: str | None = None):
         "status": "success",
         "accepted_exports": list_accepted_exports(tenant_id),
         "rejected_audits": list_rejected_audits(tenant_id),
+        "crm_syncs": list_crm_syncs(tenant_id),
     }
+
+
+@router.get("/jobs")
+def jobs(tenant_id: str | None = None):
+    return {"status": "success", "items": list_jobs(tenant_id)}
+
+
+@router.get("/jobs/{job_id}")
+def job_detail(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": "success", "job": job}
 
 
 @router.get("/tenants")
@@ -290,6 +326,37 @@ def mine(req: LeadVaultMineRequest):
         max_posts_per_query=max(1, min(req.max_posts_per_query, 25)),
         lead_objective=req.lead_objective,
     )
+
+
+@router.post("/autonomous-run")
+def autonomous_run(req: LeadVaultMineRequest, background: bool = Query(True)):
+    if not req.confirmed:
+        raise HTTPException(
+            status_code=409,
+            detail="Review and confirm the generated LeadVault mining brain before running autonomous mining.",
+        )
+    payload = req.model_dump()
+    if background:
+        job = start_autonomous_job(payload)
+        return {"status": "queued", "job": job}
+    return run_autonomous_pipeline(payload)
+
+
+@router.post("/crm-sync")
+def crm_sync(req: CrmSyncRequest):
+    rows = req.rows
+    if not rows:
+        latest = latest_accepted_export(req.tenant_id)
+        rows = (latest or {}).get("rows") or []
+    return {"status": "success", "sync": sync_leads_to_crm(req.tenant_id, rows, req.provider)}
+
+
+@router.post("/memory/search")
+def memory_search(req: MemorySearchRequest):
+    return {
+        "status": "success",
+        "items": search_memory(req.tenant_id, req.query, req.limit),
+    }
 
 
 @router.post("/mine-upload")

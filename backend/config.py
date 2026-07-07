@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     APIFY_API_TOKENS: str = ""
     APIFY_LINKEDIN_ACTORS: str = "supreme_coder/linkedin-post,harvestapi/linkedin-post-search,get-leads/linkedin-scraper"
 
+    CRM_WEBHOOK_URL: str = ""
+    HUBSPOT_ACCESS_TOKEN: str = ""
+    HUNTER_API_KEY: str = ""
+    CLEARBIT_API_KEY: str = ""
+    APOLLO_API_KEY: str = ""
+    ENABLE_LIVE_ENRICHMENT: bool = False
+
 
 @lru_cache()
 def get_settings() -> Settings:

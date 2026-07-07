@@ -16,8 +16,10 @@ from openpyxl import load_workbook
 from config import settings
 from services.accepted_export_store import save_accepted_export
 from services.buying_intent_agent import analyze_buying_intent
+from services.enrichment_service import enrich_leads
 from services.final_verifier import verify_post
 from services.leadvault_agent import build_leadvault_spec, leadvault_spec_as_dict
+from services.memory_store import index_memory
 from services.rejected_audit_store import save_rejected_audit
 
 
@@ -39,14 +41,18 @@ LINKEDIN_TEXT_KEYS = (
     "text",
     "postText",
     "post_text",
+    "postContent",
+    "headline",
+    "summary",
     "content",
     "commentary",
     "description",
+    "jobDescription",
     "body",
     "caption",
 )
-LINKEDIN_URL_KEYS = ("url", "postUrl", "post_url", "link", "activityUrl", "linkedinUrl")
-LINKEDIN_TITLE_KEYS = ("authorName", "author", "name", "companyName", "company", "title")
+LINKEDIN_URL_KEYS = ("url", "postUrl", "post_url", "link", "activityUrl", "linkedinUrl", "jobUrl", "apply_url")
+LINKEDIN_TITLE_KEYS = ("authorName", "author", "name", "companyName", "company", "title", "headline")
 
 
 @dataclass
@@ -163,8 +169,32 @@ def _linkedin_search_url(query: str) -> str:
     return f"https://www.linkedin.com/search/results/content/?keywords={encoded}&datePosted=%22past-week%22&sortBy=%22date_posted%22"
 
 
-def _apify_inputs(query: str, max_posts: int) -> list[dict[str, Any]]:
+def _apify_inputs(actor_id: str, query: str, max_posts: int, lead_objective: str = "agency_procurement") -> list[dict[str, Any]]:
     url = _linkedin_search_url(query)
+    lowered_actor = actor_id.lower()
+    if "harvestapi/linkedin-post-search" in lowered_actor:
+        return [
+            {
+                "searchQueries": [query],
+                "maxPosts": max_posts,
+                "postedLimit": "week",
+                "sortBy": "date",
+                "contentType": "all",
+                "scrapeComments": False,
+                "scrapeReactions": False,
+                "scrapePages": 1,
+            }
+        ]
+    if "get-leads/linkedin-scraper" in lowered_actor:
+        mode = "jobs" if lead_objective == "candidate_job_search" else "search"
+        return [
+            {
+                "mode": mode,
+                "searchQuery": query,
+                "maxResults": max_posts,
+                "timePosted": "week",
+            }
+        ]
     return [
         {"urls": [{"url": url}], "maxItems": max_posts, "maxPosts": max_posts, "proxy": {"useApifyProxy": True}},
         {"startUrls": [{"url": url}], "maxItems": max_posts, "maxPosts": max_posts, "proxy": {"useApifyProxy": True}},
@@ -230,10 +260,10 @@ def _apify_item_to_candidate(item: dict[str, Any], query: str, actor_id: str) ->
     )
 
 
-def _run_apify_actor(token: str, actor_id: str, query: str, max_posts: int) -> tuple[list[MiningCandidate], str | None]:
+def _run_apify_actor(token: str, actor_id: str, query: str, max_posts: int, lead_objective: str = "agency_procurement") -> tuple[list[MiningCandidate], str | None]:
     endpoint = f"https://api.apify.com/v2/acts/{_actor_path(actor_id)}/run-sync-get-dataset-items?token={urllib.parse.quote(token)}&timeout=120&memory=1024"
     last_error: str | None = None
-    for payload in _apify_inputs(query, max_posts):
+    for payload in _apify_inputs(actor_id, query, max_posts, lead_objective):
         try:
             data = _post_json(endpoint, payload, timeout=150)
             if isinstance(data, dict):
@@ -256,7 +286,21 @@ def _run_apify_actor(token: str, actor_id: str, query: str, max_posts: int) -> t
     return [], last_error
 
 
-def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_per_query: int) -> tuple[list[MiningCandidate], list[dict[str, Any]]]:
+def _ordered_actors(actors: list[str], lead_objective: str) -> list[str]:
+    def priority(actor: str) -> tuple[int, str]:
+        lowered = actor.lower()
+        if lead_objective == "candidate_job_search" and "get-leads/linkedin-scraper" in lowered:
+            return (0, actor)
+        if "harvestapi/linkedin-post-search" in lowered:
+            return (0, actor)
+        if "get-leads/linkedin-scraper" in lowered:
+            return (1, actor)
+        return (2, actor)
+
+    return sorted(actors, key=priority)
+
+
+def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_per_query: int, lead_objective: str = "agency_procurement") -> tuple[list[MiningCandidate], list[dict[str, Any]]]:
     tokens = _split_setting(settings.APIFY_API_TOKENS)
     actors = _split_setting(settings.APIFY_LINKEDIN_ACTORS)
     report: list[dict[str, Any]] = []
@@ -265,12 +309,13 @@ def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_p
         return candidates, [{"status": "skipped", "reason": "missing_apify_tokens_or_actors"}]
 
     token_index = 0
+    ordered_actors = _ordered_actors(actors, lead_objective)
     for query in queries[:max_queries]:
         query_report = {"query": query, "status": "empty", "actor": "", "items": 0, "error": ""}
-        for actor_id in actors:
+        for actor_id in ordered_actors:
             token = tokens[token_index % len(tokens)]
             token_index += 1
-            rows, error = _run_apify_actor(token, actor_id, query, max_posts_per_query)
+            rows, error = _run_apify_actor(token, actor_id, query, max_posts_per_query, lead_objective)
             query_report = {
                 "query": query,
                 "status": "ok" if rows else "empty",
@@ -402,11 +447,13 @@ def _public_web_query_bank(spec: Any) -> list[str]:
     deduped = list(dict.fromkeys(queries or [*spec.linkedin_queries, *spec.buyer_phrases, *spec.google_queries]))
 
     def rank(query: str) -> tuple[int, str]:
-        if re.search(r"\b(looking for|need|seeking)\b", query, re.I):
+        if re.search(r"\b(looking for|need|seeking)\b", query, re.I) and re.search(r"\b(partner|consultant|vendor|agency|provider|firm)\b", query, re.I):
             return (0, query)
-        if re.search(r"\b(recommend|rfp|rfq|vendor evaluation)\b", query, re.I):
+        if re.search(r"\b(looking for|need|seeking)\b", query, re.I):
             return (1, query)
-        return (2, query)
+        if re.search(r"\b(recommend|rfp|rfq|vendor evaluation)\b", query, re.I):
+            return (2, query)
+        return (3, query)
 
     return sorted(deduped, key=rank)
 
@@ -490,8 +537,11 @@ def _persist_mining_rows(tenant_id: str, accepted: list[dict[str, Any]], rejecte
             "rows": accepted,
             "export_id": f"{prefix}_{tenant_id}_{int(datetime.now(timezone.utc).timestamp())}",
         })
+        index_memory(tenant_id, "accepted_lead", accepted, {"source": prefix})
     for row in rejected[:100]:
         save_rejected_audit(row)
+    if rejected:
+        index_memory(tenant_id, "rejected_signal", rejected[:100], {"source": prefix})
 
 
 def run_leadvault_mining(
@@ -526,7 +576,7 @@ def run_leadvault_mining(
     )
     queries = list(dict.fromkeys([*spec.google_queries, *spec.buyer_phrases, *spec.linkedin_queries]))
     public_web_queries = _public_web_query_bank(spec)
-    apify_queries = list(dict.fromkeys(spec.linkedin_queries + spec.buyer_phrases))
+    apify_queries = _public_web_query_bank(spec)
     candidates: list[MiningCandidate] = []
     apify_report: list[dict[str, Any]] = []
 
@@ -536,6 +586,7 @@ def run_leadvault_mining(
             apify_queries,
             max_queries=max(1, min(max_apify_queries, 25)),
             max_posts_per_query=max(1, min(max_posts_per_query, 25)),
+            lead_objective=spec.lead_objective,
         )
         candidates.extend(apify_candidates)
 
@@ -550,6 +601,7 @@ def run_leadvault_mining(
                 break
 
     accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, spec.lead_objective)
+    accepted = enrich_leads(accepted)
     _persist_mining_rows(tenant_id, accepted, rejected, "mined")
 
     return {
@@ -624,6 +676,7 @@ def run_linkedin_capture_mining(
     candidates = parse_linkedin_capture_rows(rows or [], default_query=query)
     candidates.extend(parse_linkedin_capture_text(posts_text, default_query=query))
     accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, lead_objective)
+    accepted = enrich_leads(accepted)
     _persist_mining_rows(tenant_id, accepted, rejected, "linkedin")
     return {
         "status": "success",

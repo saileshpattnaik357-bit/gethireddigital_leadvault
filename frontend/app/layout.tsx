@@ -4,6 +4,9 @@ import './styles.css'
 export const metadata: Metadata = {
   title: 'LeadVault',
   description: 'Agentic AI lead mining engine',
+  icons: {
+    icon: '/icon.svg',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

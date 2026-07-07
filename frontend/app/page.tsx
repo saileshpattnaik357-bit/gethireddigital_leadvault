@@ -46,6 +46,7 @@ interface MiningResult {
 interface RunHistory {
   accepted_exports: Array<Record<string, unknown>>
   rejected_audits: Array<Record<string, unknown>>
+  crm_syncs?: Array<Record<string, unknown>>
 }
 
 interface TenantSummary {
@@ -59,6 +60,24 @@ interface TenantSummary {
 
 type ApiState = 'checking' | 'online' | 'offline'
 type OperationState = 'idle' | 'uploading' | 'generating' | 'mining' | 'analyzing' | 'success' | 'error'
+
+interface ProviderStatus {
+  provider: string
+  configured: boolean
+  usable: boolean
+  detail: string
+}
+
+interface AgentJob {
+  job_id: string
+  status: string
+  job_type: string
+  tenant_id: string
+  created_at_utc: string
+  updated_at_utc: string
+  result?: MiningResult | null
+  error?: string
+}
 
 const leadColumns = [
   'Date Added',
@@ -122,6 +141,8 @@ export default function LeadVaultPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [tenants, setTenants] = useState<TenantSummary[]>([])
   const [operation, setOperation] = useState<OperationState>('idle')
+  const [providers, setProviders] = useState<ProviderStatus[]>([])
+  const [jobs, setJobs] = useState<AgentJob[]>([])
 
   const readyToGenerate = Boolean(form.company_name.trim() || form.website.trim() || form.icp.trim() || icpFile)
   const acceptedRows = result?.accepted ?? []
@@ -130,10 +151,12 @@ export default function LeadVaultPage() {
   useEffect(() => {
     checkApi()
     void loadTenants()
+    void loadDiagnostics()
   }, [])
 
   useEffect(() => {
     void loadHistory()
+    void loadJobs()
   }, [form.tenant_id])
 
   async function checkApi() {
@@ -153,6 +176,26 @@ export default function LeadVaultPage() {
       if (res.ok) setTenants(data.items ?? [])
     } catch {
       // The API badge already communicates an offline backend.
+    }
+  }
+
+  async function loadDiagnostics() {
+    try {
+      const res = await fetch(`${API}/api/leadvault/diagnostics`, { cache: 'no-store' })
+      const data = await res.json()
+      if (res.ok) setProviders(data.providers ?? [])
+    } catch {
+      // Offline state is already shown by the API badge.
+    }
+  }
+
+  async function loadJobs() {
+    try {
+      const res = await fetch(`${API}/api/leadvault/jobs?tenant_id=${encodeURIComponent(form.tenant_id)}`, { cache: 'no-store' })
+      const data = await res.json()
+      if (res.ok) setJobs(data.items ?? [])
+    } catch {
+      // keep current jobs if offline
     }
   }
 
@@ -188,6 +231,7 @@ export default function LeadVaultPage() {
         setHistory({
           accepted_exports: data.accepted_exports ?? [],
           rejected_audits: data.rejected_audits ?? [],
+          crm_syncs: data.crm_syncs ?? [],
         })
       }
     } catch {
@@ -314,6 +358,51 @@ export default function LeadVaultPage() {
       setOperation('success')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Mining failed')
+      setOperation('error')
+    } finally {
+      setMining(false)
+    }
+  }
+
+  async function autonomousRun() {
+    if (!confirmed) {
+      setMessage('Confirm the mining brain before starting the autonomous agent.')
+      return
+    }
+    setMining(true)
+    setOperation('mining')
+    setMessage('')
+    try {
+      const payload = {
+        tenant_id: form.tenant_id,
+        company_name: spec?.company_name || form.company_name,
+        website: spec?.website || form.website,
+        services: spec?.services?.length ? spec.services : lines(form.services),
+        geography: spec?.geography || form.geography,
+        icp: spec?.icp || form.icp,
+        positioning: spec?.positioning || form.positioning,
+        customer_examples: spec?.customer_examples?.length ? spec.customer_examples : lines(form.customer_examples),
+        founder_profile: spec?.founder_profile || form.founder_profile,
+        lead_objective: spec?.lead_objective || form.lead_objective,
+        confirmed: true,
+        mining_mode: mode,
+        max_apify_queries: boundedNumber(maxApifyQueries, 1, 25, 10),
+        max_posts_per_query: boundedNumber(maxPostsPerQuery, 1, 25, 10),
+        max_results: boundedNumber(maxResults, 1, 100, 25),
+        live_web: liveWeb,
+      }
+      const res = await fetch(`${API}/api/leadvault/autonomous-run?background=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail ?? 'Autonomous run failed')
+      await loadJobs()
+      setMessage(`Autonomous agent queued: ${data.job?.job_id ?? 'job created'}. Refresh jobs to see completion.`)
+      setOperation('success')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Autonomous run failed')
       setOperation('error')
     } finally {
       setMining(false)
@@ -451,10 +540,20 @@ export default function LeadVaultPage() {
             {tenants.map((tenant) => <option key={tenant.tenant_id} value={tenant.tenant_id}>{tenant.company_name} ({tenant.tenant_id})</option>)}
           </select>
         </div>
-        <div className="workspace-actions">
+          <div className="workspace-actions">
           <span>{tenants.length} saved workspace{tenants.length === 1 ? '' : 's'}</span>
           <button onClick={() => void loadTenants()}><RefreshCw size={14} /> Refresh</button>
+          <button onClick={() => { void loadDiagnostics(); void loadJobs() }}><RefreshCw size={14} /> Agent Status</button>
           <button onClick={newTenant}><Plus size={14} /> New Client</button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title"><Radar size={17} /> Agent Readiness</div>
+        <div className="chips">
+          {(providers.length ? providers : [{ provider: 'diagnostics', configured: false, usable: false, detail: 'Run backend diagnostics' }]).map((provider) => (
+            <span key={provider.provider}>{provider.usable ? 'Ready' : provider.configured ? 'Configured' : 'Local'} | {provider.provider}: {provider.detail}</span>
+          ))}
         </div>
       </section>
 
@@ -533,6 +632,7 @@ export default function LeadVaultPage() {
 
           <div className="actions">
             <button className="primary" onClick={mine} disabled={!confirmed || mining}><Play size={14} /> {mining ? 'Mining...' : 'Mine Client Details'}</button>
+            <button onClick={autonomousRun} disabled={!confirmed || mining}><Radar size={14} /> Start Autonomous Run</button>
             <button onClick={uploadAndMine} disabled={!icpFile || !confirmed || mining}><Radar size={14} /> Upload + Mine</button>
             <button onClick={copySnippet} disabled={!spec?.python_snippet}><Copy size={14} /> Copy Python</button>
           </div>
@@ -591,6 +691,21 @@ export default function LeadVaultPage() {
           items={history.rejected_audits}
           subtitle={historyLoading ? 'Refreshing...' : 'Recent rejected audit rows for this tenant'}
           emptyText="No rejected audit history yet."
+        />
+      </section>
+
+      <section className="grid two">
+        <HistoryPanel
+          title={`Autonomous Jobs (${jobs.length})`}
+          items={jobs as unknown as Array<Record<string, unknown>>}
+          subtitle="Background scrape-to-export agent runs for this tenant"
+          emptyText="No autonomous jobs yet."
+        />
+        <HistoryPanel
+          title={`CRM Sync History (${history.crm_syncs?.length ?? 0})`}
+          items={history.crm_syncs ?? []}
+          subtitle="Local CRM sync audit or webhook delivery records"
+          emptyText="No CRM sync records yet."
         />
       </section>
 
