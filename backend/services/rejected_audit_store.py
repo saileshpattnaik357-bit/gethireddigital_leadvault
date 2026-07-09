@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+
+from services.sqlite_store import save_record
 
 
 STORE_FILE = Path(__file__).resolve().parent.parent / "runtime" / "rejected_audits.json"
 STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
+LOCK = threading.Lock()
 
 
 def _read() -> list[dict[str, Any]]:
@@ -24,15 +29,17 @@ def _write(items: list[dict[str, Any]]) -> None:
 
 
 def save_rejected_audit(payload: dict[str, Any]) -> dict[str, Any]:
-    items = _read()
     record = {
-        "audit_id": payload.get("audit_id") or f"audit_{len(items)+1}",
+        "audit_id": payload.get("audit_id") or f"audit_{uuid4().hex[:12]}",
         "tenant_id": payload.get("tenant_id") or "default",
         "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
-    items.insert(0, record)
-    _write(items[:50])
+    with LOCK:
+        items = _read()
+        items.insert(0, record)
+        _write(items[:250])
+    save_record("rejected_audit", record["tenant_id"], record, record["audit_id"])
     return record
 
 

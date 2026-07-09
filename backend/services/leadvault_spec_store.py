@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+
+from services.sqlite_store import save_record
 
 
 STORE_FILE = Path(__file__).resolve().parent.parent / "runtime" / "leadvault_specs.json"
 STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
+LOCK = threading.Lock()
 
 
 def _read() -> list[dict[str, Any]]:
@@ -24,15 +29,17 @@ def _write(items: list[dict[str, Any]]) -> None:
 
 
 def save_leadvault_spec(payload: dict[str, Any]) -> dict[str, Any]:
-    items = _read()
     record = {
-        "spec_id": payload.get("spec_id") or f"leadvault_{len(items)+1}",
+        "spec_id": payload.get("spec_id") or f"leadvault_{uuid4().hex[:12]}",
         "tenant_id": payload.get("tenant_id") or "default",
         "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
-    items.insert(0, record)
-    _write(items[:25])
+    with LOCK:
+        items = _read()
+        items.insert(0, record)
+        _write(items[:100])
+    save_record("saved_plan", record["tenant_id"], record, record["spec_id"])
     return record
 
 
