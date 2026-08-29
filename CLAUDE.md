@@ -1,5 +1,10 @@
 # LeadVaultAI Project Memory
 
+**🛠 Claude AI Toolkit Integration**
+- 📚 [Skills Registry](https://github.com/saileshpattnaik357/claude-ai-toolkit/blob/main/SKILLS_REGISTRY.md) — 100+ Anthropic skills
+- 🔧 [External Tools](https://github.com/saileshpattnaik357/claude-ai-toolkit/blob/main/EXTERNAL_TOOLS.md) — 20 tools (Semantica, claude-ads, Fooocus, etc.)
+- 🗺️ [Projects Map](https://github.com/saileshpattnaik357/claude-ai-toolkit/blob/main/PROJECTS.md) — Tool recommendations for LeadVault
+
 Last updated: 2026-06-24
 
 For the current takeover state, also read `HANDOVER_TO_CLAUDE.md`. It supersedes stale status or roadmap statements in older sections of this file.
