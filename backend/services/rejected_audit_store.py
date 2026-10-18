@@ -32,7 +32,7 @@ def save_rejected_audit(payload: dict[str, Any]) -> dict[str, Any]:
         "payload": payload,
     }
     items.insert(0, record)
-    _write(items[:50])
+    _write(items[:1000])
     return record
 
 

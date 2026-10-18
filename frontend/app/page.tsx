@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Brain, CheckCircle2, Copy, Download, FileSpreadsheet, Play, Plus, Radar, RefreshCw, Upload, XCircle } from 'lucide-react'
+import { Activity, Brain, CheckCircle2, Copy, Download, FileSpreadsheet, Play, Plus, Radar, RefreshCw, ShieldCheck, Upload, XCircle } from 'lucide-react'
 
 const API = process.env.NEXT_PUBLIC_LEADVAULT_API ?? 'http://localhost:8000'
 
@@ -25,11 +25,44 @@ interface LeadVaultSpec {
   generation_mode: string
 }
 
+interface ApprovalItem {
+  approval_id: string
+  tenant_id: string
+  workflow_id?: string | null
+  state: string
+  created_at_utc: string
+  decided_by?: string | null
+  decision_comment?: string
+  agent_id: string
+  recommended_action: string
+  reason: string
+  evidence: { evidence?: string[]; negative_signals?: string[]; confidence?: number; llm?: { verdict?: string; reason?: string } | null }
+  lead: Record<string, unknown>
+}
+
+interface WorkflowItem {
+  workflow_id: string
+  tenant_id: string
+  objective: string
+  state: string
+  created_at_utc: string
+  updated_at_utc: string
+  history: Array<{ ts: string; from: string | null; to: string; actor: string; note?: string }>
+  summary: Record<string, unknown>
+  metrics: { latency_seconds?: number; estimated_cost_usd?: number; tool_calls?: Record<string, number>; tool_errors?: Record<string, number>; accept_rate?: number }
+  error?: string | null
+}
+
 interface MiningResult {
   accepted: Array<Record<string, unknown>>
   rejected: Array<Record<string, unknown>>
+  pending_approval?: ApprovalItem[]
+  workflow_id?: string
+  workflow_state?: string
   apify_report?: Array<{ query: string; status: string; actor: string; items: number; error: string }>
   summary: {
+    pending_approval?: number
+    llm_validation?: boolean
     source?: string
     candidates_reviewed: number
     accepted: number
@@ -122,6 +155,10 @@ export default function LeadVaultPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [tenants, setTenants] = useState<TenantSummary[]>([])
   const [operation, setOperation] = useState<OperationState>('idle')
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([])
+  const [workflows, setWorkflows] = useState<WorkflowItem[]>([])
+  const [reviewer, setReviewer] = useState('operator')
+  const [deciding, setDeciding] = useState<string | null>(null)
 
   const readyToGenerate = Boolean(form.company_name.trim() || form.website.trim() || form.icp.trim() || icpFile)
   const acceptedRows = result?.accepted ?? []
@@ -194,6 +231,44 @@ export default function LeadVaultPage() {
       // keep existing history if offline
     } finally {
       setHistoryLoading(false)
+    }
+    void loadHarness()
+  }
+
+  async function loadHarness() {
+    const tenant = encodeURIComponent(form.tenant_id)
+    try {
+      const [a, w] = await Promise.all([
+        fetch(`${API}/api/leadvault/harness/approvals?tenant_id=${tenant}`, { cache: 'no-store' }),
+        fetch(`${API}/api/leadvault/harness/workflows?tenant_id=${tenant}&limit=8`, { cache: 'no-store' }),
+      ])
+      if (a.ok) setApprovals((await a.json()).items ?? [])
+      if (w.ok) setWorkflows((await w.json()).items ?? [])
+    } catch {
+      // offline: leave the panels as they were
+    }
+  }
+
+  async function decideApproval(approvalId: string, decision: 'approved' | 'rejected') {
+    if (!reviewer.trim()) {
+      setMessage('Enter a reviewer name before deciding — every decision is recorded with who made it.')
+      return
+    }
+    setDeciding(approvalId)
+    try {
+      const res = await fetch(`${API}/api/leadvault/harness/approvals/${encodeURIComponent(approvalId)}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: form.tenant_id, decision, actor: reviewer.trim(), comment: '' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail ?? 'Decision failed')
+      setMessage(`Lead ${decision} by ${reviewer.trim()}.`)
+      await loadHistory()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Decision failed')
+    } finally {
+      setDeciding(null)
     }
   }
 
@@ -310,7 +385,7 @@ export default function LeadVaultPage() {
       setResult(data)
       await loadHistory()
       await loadTenants()
-      setMessage(`Mining complete: ${data.summary.accepted} accepted, ${data.summary.rejected} rejected, ${data.summary.candidates_reviewed} reviewed.`)
+      setMessage(`Mining complete: ${data.summary.accepted} accepted, ${data.summary.pending_approval ?? 0} awaiting approval, ${data.summary.rejected} rejected, ${data.summary.candidates_reviewed} reviewed.`)
       setOperation('success')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Mining failed')
@@ -384,7 +459,7 @@ export default function LeadVaultPage() {
       setResult(data)
       await loadHistory()
       await loadTenants()
-      setMessage(`LinkedIn capture analyzed: ${data.summary.accepted} accepted, ${data.summary.rejected} rejected.`)
+      setMessage(`LinkedIn capture analyzed: ${data.summary.accepted} accepted, ${data.summary.pending_approval ?? 0} awaiting approval, ${data.summary.rejected} rejected.`)
       setOperation('success')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'LinkedIn capture failed')
@@ -576,6 +651,74 @@ export default function LeadVaultPage() {
             <button onClick={() => void downloadBackendXlsx('rejected', form.tenant_id).catch((error) => setMessage(error instanceof Error ? error.message : 'Failed to download rejected XLSX'))}><Download size={14} /> Rejected XLSX</button>
           </div>
           <p className="muted">Accepted rows are also persisted by the backend audit/export stores when mining runs.</p>
+        </div>
+      </section>
+
+      <section className="grid two">
+        <div className="panel raised">
+          <div className="panel-title"><ShieldCheck size={17} /> Approvals Queue ({approvals.length})</div>
+          <p className="muted">Tier-1 (hot) leads are parked here by policy P-ACCEPT-02. Nothing reaches the accepted export until a named reviewer decides.</p>
+          <Input label="Reviewer (recorded on every decision)" value={reviewer} onChange={setReviewer} placeholder="your name" />
+          {approvals.length ? (
+            <div className="approval-list">
+              {approvals.slice(0, 8).map((item) => (
+                <div key={item.approval_id} className="approval-item">
+                  <div className="approval-head">
+                    <strong>{String(item.lead['Client Name'] ?? 'Unknown')}</strong>
+                    <span className="pill">score {String(item.lead.intent_score ?? '?')}</span>
+                    <span className="pill">{String(item.lead.category ?? '')}</span>
+                    {item.evidence?.llm?.verdict ? <span className="pill">llm: {item.evidence.llm.verdict}</span> : null}
+                  </div>
+                  <p className="approval-text">{String(item.lead['Client Intent Signal'] ?? '').slice(0, 260)}</p>
+                  <p className="muted small">
+                    Why: {(item.evidence?.evidence ?? []).slice(0, 4).join(', ') || 'no rule evidence'}
+                    {item.evidence?.negative_signals?.length ? ` · against: ${item.evidence.negative_signals.slice(0, 3).join(', ')}` : ''}
+                    {typeof item.evidence?.confidence === 'number' ? ` · confidence ${Math.round(item.evidence.confidence * 100)}%` : ''}
+                  </p>
+                  <div className="actions">
+                    <button className="primary" disabled={deciding === item.approval_id} onClick={() => void decideApproval(item.approval_id, 'approved')}><CheckCircle2 size={14} /> Approve</button>
+                    <button disabled={deciding === item.approval_id} onClick={() => void decideApproval(item.approval_id, 'rejected')}><XCircle size={14} /> Reject</button>
+                    <span className="muted small">{item.recommended_action}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No leads awaiting review for this workspace.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title"><Activity size={17} /> Agent Activity ({workflows.length})</div>
+          <p className="muted">Each mining run is an explicit workflow. Every state change and tool call is audited.</p>
+          {workflows.length ? (
+            <div className="history-list">
+              {workflows.slice(0, 6).map((wf) => (
+                <details key={wf.workflow_id} className="history-item">
+                  <summary>
+                    <span className={`state state-${wf.state.toLowerCase()}`}>{wf.state}</span> {wf.workflow_id} · {wf.objective}
+                    {typeof wf.metrics?.latency_seconds === 'number' ? ` · ${wf.metrics.latency_seconds}s` : ''}
+                    {typeof wf.metrics?.estimated_cost_usd === 'number' ? ` · ~$${wf.metrics.estimated_cost_usd.toFixed(3)}` : ''}
+                  </summary>
+                  <div className="history-detail">
+                    <ol className="timeline">
+                      {wf.history.map((h, i) => (
+                        <li key={i}><code>{h.to}</code> <span className="muted small">by {h.actor}{h.note ? ` — ${h.note}` : ''}</span></li>
+                      ))}
+                    </ol>
+                    {wf.metrics?.tool_calls && Object.keys(wf.metrics.tool_calls).length ? (
+                      <p className="muted small">Tools: {Object.entries(wf.metrics.tool_calls).map(([k, v]) => `${k}×${v}`).join(', ')}
+                        {wf.metrics.tool_errors && Object.keys(wf.metrics.tool_errors).length ? ` · errors: ${Object.entries(wf.metrics.tool_errors).map(([k, v]) => `${k}×${v}`).join(', ')}` : ''}
+                      </p>
+                    ) : <p className="muted small">No external tools called.</p>}
+                    {wf.error ? <p className="error small">Error: {wf.error}</p> : null}
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No workflows yet for this workspace.</p>
+          )}
         </div>
       </section>
 

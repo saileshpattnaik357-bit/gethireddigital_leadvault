@@ -5,3 +5,5 @@ openpyxl>=3.1.5
 python-multipart>=0.0.9
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
+# Optional: only used when LEADVAULT_LLM_VALIDATION=1
+anthropic>=0.40.0

@@ -1,6 +1,0 @@
-INFO:     127.0.0.1:50397 - "GET /api/leadvault/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50402 - "GET /api/leadvault/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50404 - "GET /api/leadvault/tenants HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50408 - "POST /api/leadvault/mine HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50427 - "POST /api/leadvault/mine HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50445 - "POST /api/leadvault/linkedin-capture HTTP/1.1" 200 OK

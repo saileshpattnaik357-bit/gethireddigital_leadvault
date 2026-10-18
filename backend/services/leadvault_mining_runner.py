@@ -13,11 +13,21 @@ from typing import Any
 from openpyxl import load_workbook
 
 from config import settings
+from harness import approvals, audit, workflow
+from harness import llm as llm_layer
+from harness.context import build_packet
+from harness.metrics import metrics
+from harness.policy import Action, Decision, PolicyDenied, policy_engine
+from harness.tools import ToolRefused, gateway
+from harness.workflow import State
 from services.accepted_export_store import save_accepted_export
 from services.buying_intent_agent import analyze_buying_intent
 from services.final_verifier import verify_post
 from services.leadvault_agent import build_leadvault_spec, leadvault_spec_as_dict
 from services.rejected_audit_store import save_rejected_audit
+
+ORCHESTRATOR = "mining_orchestrator"
+QUALIFIER = "intent_qualifier"
 
 
 BUYER_SENTENCE = re.compile(
@@ -221,7 +231,22 @@ def _apify_item_to_candidate(item: dict[str, Any], query: str, actor_id: str) ->
     )
 
 
-def _run_apify_actor(token: str, actor_id: str, query: str, max_posts: int) -> tuple[list[MiningCandidate], str | None]:
+_token_cursor = 0
+
+
+def _next_apify_token() -> str:
+    """Rotate through configured tokens. The token never leaves this module."""
+    global _token_cursor
+    tokens = _split_setting(settings.APIFY_API_TOKENS)
+    if not tokens:
+        raise RuntimeError("missing_apify_tokens")
+    token = tokens[_token_cursor % len(tokens)]
+    _token_cursor += 1
+    return token
+
+
+def _run_apify_actor(actor_id: str, query: str, max_posts: int) -> tuple[list[MiningCandidate], str | None]:
+    token = _next_apify_token()
     endpoint = f"https://api.apify.com/v2/acts/{_actor_path(actor_id)}/run-sync-get-dataset-items?token={urllib.parse.quote(token)}&timeout=120&memory=1024"
     last_error: str | None = None
     for payload in _apify_inputs(query, max_posts):
@@ -247,7 +272,20 @@ def _run_apify_actor(token: str, actor_id: str, query: str, max_posts: int) -> t
     return [], last_error
 
 
-def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_per_query: int) -> tuple[list[MiningCandidate], list[dict[str, Any]]]:
+# Register real implementations with the tool gateway. Every external call in
+# this module goes through gateway.invoke so it is policy-checked and audited.
+gateway.register_impl("apify_linkedin_search", _run_apify_actor)
+
+
+def _apify_linkedin_candidates(
+    queries: list[str],
+    max_queries: int,
+    max_posts_per_query: int,
+    *,
+    tenant_id: str = "default",
+    workflow_id: str | None = None,
+    policy_context: dict[str, Any] | None = None,
+) -> tuple[list[MiningCandidate], list[dict[str, Any]]]:
     tokens = _split_setting(settings.APIFY_API_TOKENS)
     actors = _split_setting(settings.APIFY_LINKEDIN_ACTORS)
     report: list[dict[str, Any]] = []
@@ -255,13 +293,20 @@ def _apify_linkedin_candidates(queries: list[str], max_queries: int, max_posts_p
     if not tokens or not actors:
         return candidates, [{"status": "skipped", "reason": "missing_apify_tokens_or_actors"}]
 
-    token_index = 0
     for query in queries[:max_queries]:
         query_report = {"query": query, "status": "empty", "actor": "", "items": 0, "error": ""}
         for actor_id in actors:
-            token = tokens[token_index % len(tokens)]
-            token_index += 1
-            rows, error = _run_apify_actor(token, actor_id, query, max_posts_per_query)
+            try:
+                rows, error = gateway.invoke(
+                    "apify_linkedin_search",
+                    agent_id=ORCHESTRATOR, tenant=tenant_id, workflow=workflow_id, context=policy_context,
+                    actor_id=actor_id, query=query, max_posts=max_posts_per_query,
+                )
+            except (PolicyDenied, ToolRefused) as exc:
+                report.append({"query": query, "status": "denied", "actor": actor_id, "items": 0, "error": str(exc)[:160]})
+                return candidates, report
+            except Exception as exc:  # noqa: BLE001
+                rows, error = [], str(exc)[:240]
             query_report = {
                 "query": query,
                 "status": "ok" if rows else "empty",
@@ -296,18 +341,37 @@ def _duckduckgo_candidates(query: str, limit: int) -> list[MiningCandidate]:
     return candidates
 
 
-def _page_signal_candidates(seed: MiningCandidate, limit: int = 4) -> list[MiningCandidate]:
+def _fetch_page_signals(url: str, query: str, title: str, limit: int = 4) -> list[MiningCandidate]:
+    """Tool implementation: fetch one public page and extract buyer-intent sentences."""
+    body = _clean_html(_open_url(url))
+    snippets = [match.group(0).strip() for match in BUYER_SENTENCE.finditer(body)]
+    return [
+        MiningCandidate(text=snippet[:900], query=query, source="public_page", url=url, title=title)
+        for snippet in snippets[:limit]
+    ]
+
+
+gateway.register_impl("duckduckgo_search", _duckduckgo_candidates)
+gateway.register_impl("fetch_public_page", _fetch_page_signals)
+
+
+def _page_signal_candidates(
+    seed: MiningCandidate,
+    limit: int = 4,
+    *,
+    tenant_id: str = "default",
+    workflow_id: str | None = None,
+) -> list[MiningCandidate]:
     if not seed.url:
         return []
     try:
-        body = _clean_html(_open_url(seed.url))
-    except Exception:
+        return gateway.invoke(
+            "fetch_public_page",
+            agent_id=ORCHESTRATOR, tenant=tenant_id, workflow=workflow_id,
+            url=seed.url, query=seed.query, title=seed.title, limit=limit,
+        )
+    except Exception:  # noqa: BLE001 — refused/denied/error are all audited by the gateway
         return []
-    snippets = [match.group(0).strip() for match in BUYER_SENTENCE.finditer(body)]
-    return [
-        MiningCandidate(text=snippet[:900], query=seed.query, source="public_page", url=seed.url, title=seed.title)
-        for snippet in snippets[:limit]
-    ]
 
 
 def _linkedin_search_urls(queries: list[str]) -> list[dict[str, str]]:
@@ -354,10 +418,101 @@ def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: 
     }
 
 
-def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_results: int, lead_objective: str = "agency_procurement") -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+ACCEPT_THRESHOLD = 60
+
+
+def _llm_second_opinion(
+    candidate: MiningCandidate,
+    classification: Any,
+    intent: Any,
+    *,
+    tenant_id: str,
+    workflow_id: str | None,
+    lead_objective: str,
+    icp_context: dict[str, Any],
+    budget: dict[str, int],
+) -> dict[str, Any] | None:
+    """Ask the LLM validator for borderline rows only, when enabled and within budget."""
+    if not llm_layer.is_enabled(settings):
+        return None
+    if not llm_layer.is_borderline(should_export=classification.should_export, score=intent.intent_score):
+        return None
+    if budget["used"] >= llm_layer.MAX_LLM_CALLS_PER_RUN:
+        return None
+    decision = policy_engine.decide(Action.TOOL_LLM_VALIDATE, {"llm_enabled": True})
+    if decision.decision != Decision.ALLOW:
+        return None
+    budget["used"] += 1
+    packet = build_packet(
+        objective=lead_objective,
+        post_text=candidate.text,
+        icp_summary=str(icp_context.get("icp", "")),
+        services=list(icp_context.get("services", []) or []),
+        company_name=str(icp_context.get("company_name", "")),
+        deterministic_verdict={
+            "category": classification.category,
+            "score": intent.intent_score,
+            "evidence": intent.evidence,
+            "negative_signals": intent.negative_signals,
+        },
+    )
+    verdict = llm_layer.validate(
+        packet, provider=llm_layer.build_provider(settings), model=settings.LEADVAULT_LLM_MODEL,
+        tenant=tenant_id, workflow=workflow_id, timeout=int(settings.LEADVAULT_LLM_TIMEOUT),
+    )
+    return verdict.as_dict()
+
+
+SELLER_CATEGORIES = {"SELLER_PROMOTION"}
+
+
+def _apply_llm_verdict(
+    should_export: bool, score: int, verdict: dict[str, Any] | None, category: str = ""
+) -> tuple[bool, int, str, bool]:
+    """
+    Advisory adjustment. Returns (accept, adjusted_score, note, force_review).
+
+    Asymmetric on purpose:
+      - A confident "not_buyer" may DEMOTE a borderline row (cheap, fails safe).
+      - A confident "buyer" may PROMOTE a borderline row, but the promoted row is
+        always routed to human review (force_review=True) — it never auto-exports.
+      - No promotion at all when the deterministic verifier already called it a
+        seller pitch. Live tests showed small models are fooled by "book a call"
+        posts that ask to be classified as buyers; the regex is not.
+    """
+    baseline = should_export and score >= ACCEPT_THRESHOLD
+    if not verdict or verdict.get("verdict") == "unsure" or float(verdict.get("confidence", 0)) < 0.7:
+        return baseline, score, "", False
+    if verdict["verdict"] == "buyer":
+        if category in SELLER_CATEGORIES:
+            return baseline, score, "llm_promotion_blocked_seller_category", False
+        return True, max(score, ACCEPT_THRESHOLD), "llm_promoted_borderline", True
+    return False, min(score, ACCEPT_THRESHOLD - 1), "llm_demoted_borderline", False
+
+
+def _classify_candidates(
+    candidates: list[MiningCandidate],
+    tenant_id: str,
+    max_results: int,
+    lead_objective: str = "agency_procurement",
+    *,
+    workflow_id: str | None = None,
+    icp_context: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
+    """
+    Score every candidate. Returns (accepted, rejected, pending_approval, reviewed).
+
+    Policy: tier_2 rows are accepted automatically (P-ACCEPT-01). tier_1 ("hot")
+    rows require human approval (P-ACCEPT-02) and are parked in the approval
+    queue rather than written to the accepted export.
+    """
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
     seen: set[str] = set()
+    llm_budget = {"used": 0}
+    icp_context = icp_context or {}
+
     for candidate in candidates:
         key = f"{candidate.text}|{candidate.url}".lower()
         if key in seen:
@@ -369,12 +524,44 @@ def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_
             account={"company": candidate.title, "website": candidate.url, "source": candidate.source},
             verification_category=classification.category,
         )
-        if classification.should_export and intent.intent_score >= 60:
-            accepted.append(_candidate_to_lead(candidate, classification, intent, tenant_id, lead_objective))
+        llm_verdict = _llm_second_opinion(
+            candidate, classification, intent,
+            tenant_id=tenant_id, workflow_id=workflow_id, lead_objective=lead_objective,
+            icp_context=icp_context, budget=llm_budget,
+        )
+        accept, score, llm_note, force_review = _apply_llm_verdict(
+            classification.should_export, intent.intent_score, llm_verdict, classification.category
+        )
+
+        if accept:
+            lead = _candidate_to_lead(candidate, classification, intent, tenant_id, lead_objective)
+            lead["intent_score"] = score
+            lead["workflow_id"] = workflow_id
+            if llm_verdict:
+                lead["llm_verdict"] = llm_verdict
+                lead["Notes"] = f"{lead.get('Notes', '')} | {llm_note}: {llm_verdict.get('reason', '')}".strip(" |")
+            decision = policy_engine.decide(
+                Action.ACCEPT_LEAD, {"hot_tier": intent.priority == "tier_1" or force_review}
+            )
+            if decision.decision == Decision.REQUIRE_APPROVAL:
+                item = approvals.enqueue(
+                    tenant_id=tenant_id, workflow_id=workflow_id, lead=lead,
+                    evidence={"evidence": intent.evidence, "negative_signals": intent.negative_signals,
+                              "confidence": intent.confidence_score, "trace": intent.explainability_trace[:12],
+                              "llm": llm_verdict},
+                    recommended_action=intent.recommended_play, reason=decision.reason,
+                )
+                pending.append(item)
+            else:
+                audit.record(who=QUALIFIER, what="accept_lead", tenant=tenant_id, workflow=workflow_id,
+                             policy=decision.policy_id, evidence={"score": score, "category": classification.category,
+                                                                  "evidence": intent.evidence[:6]})
+                accepted.append(lead)
         else:
             rejected.append({
                 "tenant_id": tenant_id,
                 "lead_objective": lead_objective,
+                "workflow_id": workflow_id,
                 "text": candidate.text,
                 "query": candidate.query,
                 "source": candidate.source,
@@ -383,14 +570,23 @@ def _classify_candidates(candidates: list[MiningCandidate], tenant_id: str, max_
                     "category": classification.category,
                     "confidence": classification.confidence,
                     "rationale": classification.rationale,
+                    "explanation": classification.explanation_reason,
                     "should_export": classification.should_export,
                 },
                 "buying_intent": asdict(intent),
-                "rejection_reason": classification.rationale if not classification.should_export else "intent_score_below_threshold",
+                "llm_verdict": llm_verdict,
+                "rejection_reason": (llm_note or (classification.rationale if not classification.should_export else "intent_score_below_threshold")),
             })
-        if len(accepted) >= max_results:
+        if len(accepted) + len(pending) >= max_results:
             break
-    return accepted, rejected, len(seen)
+
+    run = metrics.get(workflow_id)
+    if run is not None:
+        run.candidates_reviewed = len(seen)
+        run.accepted = len(accepted)
+        run.rejected = len(rejected)
+        run.pending_approval = len(pending)
+    return accepted, rejected, pending, len(seen)
 
 
 def _persist_mining_rows(tenant_id: str, accepted: list[dict[str, Any]], rejected: list[dict[str, Any]], prefix: str) -> None:
@@ -400,7 +596,7 @@ def _persist_mining_rows(tenant_id: str, accepted: list[dict[str, Any]], rejecte
             "rows": accepted,
             "export_id": f"{prefix}_{tenant_id}_{int(datetime.now(timezone.utc).timestamp())}",
         })
-    for row in rejected[:100]:
+    for row in rejected:
         save_rejected_audit(row)
 
 
@@ -422,6 +618,10 @@ def run_leadvault_mining(
     max_posts_per_query: int = 10,
     lead_objective: str = "",
 ) -> dict[str, Any]:
+    # The route already enforced confirmed=True (409 otherwise). Re-check here so
+    # the policy holds even if this function is called from somewhere else.
+    policy_engine.assert_allowed(Action.MINE_CANDIDATES, {"confirmed": True})
+
     spec = build_leadvault_spec(
         tenant_id=tenant_id,
         company_name=company_name,
@@ -434,40 +634,81 @@ def run_leadvault_mining(
         founder_profile=founder_profile,
         lead_objective=lead_objective,
     )
+    mode = (mining_mode or "hybrid").lower()
+    wf = workflow.create(
+        tenant_id=tenant_id, objective=spec.lead_objective, actor="operator",
+        summary={"company_name": company_name, "mining_mode": mode, "max_results": max_results},
+    )
+    workflow_id = wf.workflow_id
+    metrics.start(workflow_id)
+    workflow.transition(workflow_id, State.CONFIRMED, actor="operator", note="confirmed=true via API")
+    workflow.transition(workflow_id, State.MINING, actor=ORCHESTRATOR, note=f"mode={mode}")
+    policy_context = {"confirmed": True}
+
     queries = list(dict.fromkeys([*spec.google_queries, *spec.buyer_phrases, *spec.linkedin_queries]))
     apify_queries = list(dict.fromkeys(spec.linkedin_queries + spec.buyer_phrases))
     candidates: list[MiningCandidate] = []
     apify_report: list[dict[str, Any]] = []
 
-    mode = (mining_mode or "hybrid").lower()
-    if mode in {"apify", "apify_linkedin", "hybrid"}:
-        apify_candidates, apify_report = _apify_linkedin_candidates(
-            apify_queries,
-            max_queries=max(1, min(max_apify_queries, 25)),
-            max_posts_per_query=max(1, min(max_posts_per_query, 25)),
+    try:
+        if mode in {"apify", "apify_linkedin", "hybrid"}:
+            apify_candidates, apify_report = _apify_linkedin_candidates(
+                apify_queries,
+                max_queries=max(1, min(max_apify_queries, 25)),
+                max_posts_per_query=max(1, min(max_posts_per_query, 25)),
+                tenant_id=tenant_id, workflow_id=workflow_id, policy_context=policy_context,
+            )
+            candidates.extend(apify_candidates)
+
+        if live_web and mode in {"public_web", "web", "hybrid"}:
+            per_query = max(1, min(4, max_results // max(1, min(len(queries), 8))))
+            for query in queries[:8]:
+                try:
+                    seeds = gateway.invoke(
+                        "duckduckgo_search", agent_id=ORCHESTRATOR, tenant=tenant_id, workflow=workflow_id,
+                        query=query, limit=per_query,
+                    )
+                except Exception:  # noqa: BLE001 — audited by the gateway
+                    seeds = []
+                candidates.extend(seeds)
+                for seed in seeds[:2]:
+                    candidates.extend(_page_signal_candidates(seed, limit=2, tenant_id=tenant_id, workflow_id=workflow_id))
+                if len(candidates) >= max_results * 2:
+                    break
+
+        icp_context = {"icp": icp, "services": services or [], "company_name": company_name}
+        accepted, rejected, pending, reviewed = _classify_candidates(
+            candidates, tenant_id, max_results, spec.lead_objective,
+            workflow_id=workflow_id, icp_context=icp_context,
         )
-        candidates.extend(apify_candidates)
-
-    if live_web and mode in {"public_web", "web", "hybrid"}:
-        per_query = max(1, min(4, max_results // max(1, min(len(queries), 8))))
-        for query in queries[:8]:
-            seeds = _duckduckgo_candidates(query, per_query)
-            candidates.extend(seeds)
-            for seed in seeds[:2]:
-                candidates.extend(_page_signal_candidates(seed, limit=2))
-            if len(candidates) >= max_results * 2:
-                break
-
-    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, spec.lead_objective)
-    _persist_mining_rows(tenant_id, accepted, rejected, "mined")
+        workflow.transition(workflow_id, State.CLASSIFIED, actor=QUALIFIER,
+                            note=f"reviewed={reviewed} accepted={len(accepted)} rejected={len(rejected)} pending={len(pending)}")
+        _persist_mining_rows(tenant_id, accepted, rejected, "mined")
+        run_metrics = metrics.finish(workflow_id) or {}
+        final_state = State.REVIEW if pending else State.EXPORTED
+        workflow.transition(
+            workflow_id, final_state, actor="system",
+            note=f"{len(pending)} rows awaiting approval" if pending else "accepted rows persisted",
+            summary={"accepted": len(accepted), "rejected": len(rejected), "pending_approval": len(pending),
+                     "candidates_reviewed": reviewed},
+            metrics=run_metrics,
+        )
+    except Exception as exc:  # noqa: BLE001 — record, then re-raise so the API surfaces it
+        metrics.finish(workflow_id)
+        workflow.transition(workflow_id, State.FAILED, actor="system", error=str(exc))
+        raise
 
     return {
         "status": "success",
+        "workflow_id": workflow_id,
+        "workflow_state": final_state.value,
         "spec": leadvault_spec_as_dict(spec),
         "accepted": accepted,
         "rejected": rejected[:100],
+        "pending_approval": pending,
         "apify_report": apify_report,
         "linkedin_search_urls": _linkedin_search_urls(spec.linkedin_queries),
+        "metrics": run_metrics,
         "summary": {
             "queries_generated": len(queries),
             "apify_queries_attempted": len([item for item in apify_report if item.get("query")]),
@@ -475,12 +716,14 @@ def run_leadvault_mining(
             "candidates_reviewed": reviewed,
             "accepted": len(accepted),
             "rejected": len(rejected),
+            "pending_approval": len(pending),
             "live_web": live_web,
             "mining_mode": mode,
             "max_apify_queries": max_apify_queries,
             "max_posts_per_query": max_posts_per_query,
             "lead_objective": spec.lead_objective,
             "objective_label": spec.objective_label,
+            "llm_validation": llm_layer.is_enabled(settings),
         },
     }
 
@@ -532,18 +775,48 @@ def run_linkedin_capture_mining(
 ) -> dict[str, Any]:
     candidates = parse_linkedin_capture_rows(rows or [], default_query=query)
     candidates.extend(parse_linkedin_capture_text(posts_text, default_query=query))
-    accepted, rejected, reviewed = _classify_candidates(candidates, tenant_id, max_results, lead_objective)
-    _persist_mining_rows(tenant_id, accepted, rejected, "linkedin")
+
+    # Paste/import capture spends nothing and calls no tools, so the workflow
+    # skips CONFIRMED/MINING and goes straight to classification.
+    wf = workflow.create(tenant_id=tenant_id, objective=lead_objective, actor="operator",
+                         summary={"source": "linkedin_capture", "candidates": len(candidates)})
+    workflow_id = wf.workflow_id
+    metrics.start(workflow_id)
+    workflow.transition(workflow_id, State.CONFIRMED, actor="operator", note="paste capture (no spend)")
+    workflow.transition(workflow_id, State.MINING, actor=ORCHESTRATOR, note="no tools; local rows")
+    try:
+        accepted, rejected, pending, reviewed = _classify_candidates(
+            candidates, tenant_id, max_results, lead_objective, workflow_id=workflow_id,
+        )
+        workflow.transition(workflow_id, State.CLASSIFIED, actor=QUALIFIER,
+                            note=f"reviewed={reviewed} accepted={len(accepted)} rejected={len(rejected)} pending={len(pending)}")
+        _persist_mining_rows(tenant_id, accepted, rejected, "linkedin")
+        run_metrics = metrics.finish(workflow_id) or {}
+        final_state = State.REVIEW if pending else State.EXPORTED
+        workflow.transition(workflow_id, final_state, actor="system",
+                            summary={"accepted": len(accepted), "rejected": len(rejected), "pending_approval": len(pending)},
+                            metrics=run_metrics)
+    except Exception as exc:  # noqa: BLE001
+        metrics.finish(workflow_id)
+        workflow.transition(workflow_id, State.FAILED, actor="system", error=str(exc))
+        raise
+
     return {
         "status": "success",
+        "workflow_id": workflow_id,
+        "workflow_state": final_state.value,
         "accepted": accepted,
         "rejected": rejected[:100],
+        "pending_approval": pending,
+        "metrics": run_metrics,
         "summary": {
             "source": "linkedin_capture",
             "candidates_reviewed": reviewed,
             "accepted": len(accepted),
             "rejected": len(rejected),
+            "pending_approval": len(pending),
             "live_web": False,
             "lead_objective": lead_objective,
+            "llm_validation": llm_layer.is_enabled(settings),
         },
     }

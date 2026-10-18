@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routes.harness import router as harness_router
 from api.routes.leadvault import router as leadvault_router
 from config import settings
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(leadvault_router)
+app.include_router(harness_router)
 
 
 @app.get("/")

@@ -467,3 +467,19 @@ pre {
     padding: 18px;
   }
 }
+
+/* --- Harness: approvals + agent activity --- */
+.approval-list { display: grid; gap: 12px; margin-top: 12px; }
+.approval-item { border: 1px solid var(--line, #dfe3ea); border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,0.6); }
+.approval-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.approval-text { margin: 4px 0 6px; line-height: 1.45; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2f7; color: #334155; white-space: nowrap; }
+.small { font-size: 12px; }
+.error.small { color: #b42318; }
+.state { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; background: #e2e8f0; color: #0f172a; margin-right: 6px; }
+.state-exported { background: #dcfce7; color: #14532d; }
+.state-review { background: #fef3c7; color: #78350f; }
+.state-failed { background: #fee2e2; color: #7f1d1d; }
+.state-mining, .state-classified { background: #dbeafe; color: #1e3a8a; }
+.timeline { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.timeline code { font-size: 11px; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
