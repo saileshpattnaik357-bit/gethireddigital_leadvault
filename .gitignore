@@ -1,6 +1,7 @@
 .env
 backend/.env
 backend/runtime/*.json
+backend/runtime/*.jsonl
 backend/runtime/*.log
 backend/__pycache__/
 backend/**/__pycache__/

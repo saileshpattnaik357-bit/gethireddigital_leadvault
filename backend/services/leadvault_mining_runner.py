@@ -25,6 +25,7 @@ from services.buying_intent_agent import analyze_buying_intent
 from services.final_verifier import verify_post
 from services.leadvault_agent import build_leadvault_spec, leadvault_spec_as_dict
 from services.rejected_audit_store import save_rejected_audit
+from services.revenue_intelligence import analyze_revenue_intelligence
 
 ORCHESTRATOR = "mining_orchestrator"
 QUALIFIER = "intent_qualifier"
@@ -387,12 +388,28 @@ def _linkedin_search_urls(queries: list[str]) -> list[dict[str, str]]:
 
 def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: Any, tenant_id: str, lead_objective: str) -> dict[str, Any]:
     now = datetime.now(timezone.utc).date().isoformat()
+    rev_intel = analyze_revenue_intelligence(
+        text=candidate.text,
+        intent_score=intent.intent_score,
+        confidence_score=getattr(intent, "confidence_score", 0.5),
+        title=candidate.title,
+        company_name=candidate.title,
+        source=candidate.source,
+        category=classification.category,
+        service_category=intent.signal_type,
+    )
     return {
         "Date Added": now,
         "Estimated Deal Value": "TBD",
+        "Revenue Deal Value": rev_intel.estimated_deal_value,
+        "Lead Tier": rev_intel.lead_tier,
+        "Budget Authority": rev_intel.budget_authority,
+        "Timeline": rev_intel.timeline,
+        "Pain Point Summary": rev_intel.pain_point_summary,
+        "Recommended Angle": rev_intel.recommended_outreach_angle,
         "Client Name": candidate.title or "Unknown buyer",
         "Client LinkedIn Profile URL": "",
-        "Title": "",
+        "Title": candidate.title or rev_intel.authority_role,
         "Company Name": candidate.title or "Unknown company",
         "Company Website": candidate.url,
         "Industry": "",
@@ -415,6 +432,7 @@ def _candidate_to_lead(candidate: MiningCandidate, classification: Any, intent: 
         "intent_score": intent.intent_score,
         "buying_stage": intent.buying_stage,
         "explainability_trace": intent.explainability_trace,
+        "revenue_intelligence_fields": rev_intel.revenue_intelligence_fields,
     }
 
 

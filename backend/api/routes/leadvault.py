@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from services.revenue_intelligence import analyze_revenue_intelligence
+from services.hermes_memory import hermes_memory
+from services.multi_agent_mesh import MultiAgentCoordinator
+
 import json
 from io import BytesIO
 from typing import Any
@@ -375,3 +379,89 @@ async def linkedin_capture_upload(
     result["summary"]["uploaded_rows"] = len(rows)
     result["summary"]["source_filename"] = file.filename
     return result
+
+
+# --- V5/V6/V9 Enterprise Capabilities ---
+
+class RevenueAnalyzeRequest(BaseModel):
+    text: str
+    title: str = ""
+    company_name: str = ""
+    industry: str = ""
+    source: str = "web_portal"
+    category: str = "PROCUREMENT_BUYER"
+    service_category: str = "procurement"
+    intent_score: int = 75
+    confidence_score: float = 0.8
+
+
+@router.post("/intelligence/analyze")
+def analyze_intelligence(req: RevenueAnalyzeRequest):
+    result = analyze_revenue_intelligence(
+        text=req.text,
+        intent_score=req.intent_score,
+        confidence_score=req.confidence_score,
+        title=req.title,
+        company_name=req.company_name,
+        industry=req.industry,
+        source=req.source,
+        category=req.category,
+        service_category=req.service_category,
+    )
+    return result.as_dict()
+
+
+class HermesConversionRequest(BaseModel):
+    tenant_id: str = "default"
+    lead_id: str
+    company_name: str
+    outcome: str
+    deal_value: int | None = None
+    feedback: str = ""
+    matched_rules: list[str] = []
+
+
+@router.post("/hermes/conversion")
+def record_conversion(req: HermesConversionRequest):
+    entry = hermes_memory.record_conversion_outcome(
+        tenant_id=req.tenant_id,
+        lead_id=req.lead_id,
+        company_name=req.company_name,
+        outcome=req.outcome,
+        deal_value=req.deal_value,
+        feedback=req.feedback,
+        matched_rules=req.matched_rules,
+    )
+    return {"status": "recorded", "entry": entry}
+
+
+@router.get("/hermes/reflection")
+def get_reflection(tenant_id: str = "default"):
+    report = hermes_memory.run_reflection_cycle(tenant_id)
+    return {
+        "tenant_id": report.tenant_id,
+        "total_outcomes_evaluated": report.total_outcomes_evaluated,
+        "conversion_rate": report.conversion_rate,
+        "high_yield_rules": report.high_yield_rules,
+        "underperforming_rules": report.underperforming_rules,
+        "suggested_weight_adjustments": report.suggested_weight_adjustments,
+        "generated_at": report.generated_at,
+    }
+
+
+class MeshProcessRequest(BaseModel):
+    tenant_id: str = "default"
+    company_name: str = ""
+    lead_objective: str = "agency_procurement"
+    candidates: list[dict[str, Any]] = []
+
+
+@router.post("/mesh/process")
+def process_mesh(req: MeshProcessRequest):
+    coordinator = MultiAgentCoordinator(tenant_id=req.tenant_id)
+    summary = coordinator.process_signals(
+        req.candidates,
+        company_name=req.company_name,
+        lead_objective=req.lead_objective,
+    )
+    return summary.as_dict()
