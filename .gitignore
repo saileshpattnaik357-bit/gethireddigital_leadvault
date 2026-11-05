@@ -1,8 +1,6 @@
 .env
 backend/.env
-backend/runtime/*.json
-backend/runtime/*.jsonl
-backend/runtime/*.log
+backend/runtime/
 backend/__pycache__/
 backend/**/__pycache__/
 frontend/.next/
@@ -10,8 +8,6 @@ frontend/node_modules/
 frontend/.env.local
 frontend/*.tsbuildinfo
 *.pyc
-
 *.log
 *.err.log
 leadvault/
-

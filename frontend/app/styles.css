@@ -483,3 +483,282 @@ pre {
 .state-mining, .state-classified { background: #dbeafe; color: #1e3a8a; }
 .timeline { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .timeline code { font-size: 11px; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
+
+
+/* --- Enterprise Tabs & Navigation --- */
+.tab-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  overflow-x: auto;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: rgba(18, 27, 36, 0.6);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  background: rgba(24, 37, 48, 0.9);
+  color: var(--text);
+  border-color: rgba(103, 183, 255, 0.3);
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, rgba(103, 183, 255, 0.18), rgba(74, 222, 128, 0.12));
+  color: #fff;
+  border-color: rgba(103, 183, 255, 0.5);
+  box-shadow: 0 4px 16px rgba(103, 183, 255, 0.12);
+}
+
+/* --- Lead Tier Badges & Deal Gauges --- */
+.tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+.tier-a {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.22), rgba(217, 119, 6, 0.28));
+  border: 1px solid rgba(251, 191, 36, 0.6);
+  color: #fef08a;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.2);
+}
+
+.tier-b {
+  background: rgba(59, 130, 246, 0.18);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  color: #93c5fd;
+}
+
+.tier-c {
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+}
+
+.deal-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #86efac;
+}
+
+.authority-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(103, 183, 255, 0.14);
+  border: 1px solid rgba(103, 183, 255, 0.3);
+  color: #bae6fd;
+}
+
+.timeline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: #fecdd3;
+}
+
+/* --- Multi-Agent Mesh & LangGraph Cards --- */
+.mesh-nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.mesh-node-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(18, 27, 36, 0.7);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mesh-node-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #67b7ff, #4ade80);
+}
+
+.mesh-node-card strong {
+  font-size: 14px;
+  color: #f3f8ff;
+}
+
+.mesh-node-card span {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.handoff-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.handoff-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(24, 37, 48, 0.6);
+  border: 1px solid var(--line);
+}
+
+.handoff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.handoff-agents {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.handoff-action {
+  font-size: 12px;
+  font-family: monospace;
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* --- Hermes Adaptive Memory --- */
+.hermes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.hermes-stat-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(18, 27, 36, 0.85);
+  border: 1px solid var(--line);
+}
+
+.hermes-metric-big {
+  font-size: 36px;
+  font-weight: 800;
+  color: #4ade80;
+  margin: 6px 0;
+  letter-spacing: -0.04em;
+}
+
+/* --- Modal / Drawer for 29 Fields --- */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer-content {
+  width: min(680px, 100vw);
+  height: 100vh;
+  background: #0f1722;
+  border-left: 1px solid var(--line);
+  padding: 24px;
+  overflow-y: auto;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.field-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(24, 37, 48, 0.5);
+  border: 1px solid rgba(202, 224, 255, 0.08);
+}
+
+.field-item label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.field-item span {
+  font-size: 13px;
+  color: #f3f8ff;
+  font-weight: 500;
+  word-break: break-word;
+}

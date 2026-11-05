@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from services.revenue_intelligence import analyze_revenue_intelligence
 from services.hermes_memory import hermes_memory
+from dataclasses import asdict
 from services.multi_agent_mesh import MultiAgentCoordinator
+from services.langgraph_pipeline import LangGraphPipeline
+from services.webhook_dispatcher import webhook_dispatcher
 
 import json
 from io import BytesIO
@@ -465,3 +468,78 @@ def process_mesh(req: MeshProcessRequest):
         lead_objective=req.lead_objective,
     )
     return summary.as_dict()
+
+
+# --- LangGraph & Webhooks Endpoints ---
+
+class LangGraphExecuteRequest(BaseModel):
+    tenant_id: str = "default"
+    company_name: str = ""
+    lead_objective: str = "agency_procurement"
+    candidates: list[dict[str, Any]] = []
+
+
+@router.post("/langgraph/execute")
+def execute_langgraph(req: LangGraphExecuteRequest):
+    pipeline = LangGraphPipeline(tenant_id=req.tenant_id)
+    state = pipeline.run(
+        req.candidates,
+        company_name=req.company_name,
+        lead_objective=req.lead_objective,
+    )
+    return state.as_dict()
+
+
+class WebhookRegisterRequest(BaseModel):
+    tenant_id: str = "default"
+    target_url: str
+    secret_key: str
+    trigger_events: list[str] = ["lead.approved", "lead.sql_detected"]
+
+
+@router.post("/webhooks/register")
+def register_webhook(req: WebhookRegisterRequest):
+    cfg = webhook_dispatcher.register_webhook(
+        tenant_id=req.tenant_id,
+        target_url=req.target_url,
+        secret_key=req.secret_key,
+        trigger_events=req.trigger_events,
+    )
+    return {
+        "status": "registered",
+        "tenant_id": cfg.tenant_id,
+        "target_url": cfg.target_url,
+        "trigger_events": cfg.trigger_events,
+    }
+
+
+class WebhookDispatchRequest(BaseModel):
+    tenant_id: str = "default"
+    event: str = "lead.approved"
+    lead_data: dict[str, Any] = {}
+
+
+@router.post("/webhooks/dispatch")
+def dispatch_webhook(req: WebhookDispatchRequest):
+    results = webhook_dispatcher.dispatch(
+        tenant_id=req.tenant_id,
+        event=req.event,
+        lead_data=req.lead_data,
+    )
+    return {"dispatched_count": len(results), "results": [asdict(r) for r in results]}
+
+
+@router.get("/webhooks")
+def list_webhooks(tenant_id: str = "default"):
+    configs = webhook_dispatcher.configs.get(tenant_id, [])
+    return {
+        "items": [
+            {
+                "tenant_id": c.tenant_id,
+                "target_url": c.target_url,
+                "enabled": c.enabled,
+                "trigger_events": c.trigger_events,
+            }
+            for c in configs
+        ]
+    }
