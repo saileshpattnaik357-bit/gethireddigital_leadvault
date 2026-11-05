@@ -61,20 +61,26 @@ class RunMetrics:
         return round(total, 4)
 
     def as_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        data["tool_calls"] = dict(self.tool_calls)
-        data["tool_errors"] = dict(self.tool_errors)
-        data["tool_seconds"] = {k: round(v, 3) for k, v in self.tool_seconds.items()}
-        data["tool_items"] = dict(self.tool_items)
-        data["latency_seconds"] = self.latency_seconds
-        data["estimated_cost_usd"] = self.estimated_cost_usd
-        data["accept_rate"] = round(self.accepted / self.candidates_reviewed, 4) if self.candidates_reviewed else 0.0
-        data["tool_error_rate"] = round(
-            sum(self.tool_errors.values()) / max(1, sum(self.tool_calls.values())), 4
-        )
-        data.pop("started_at", None)
-        data.pop("finished_at", None)
-        return data
+        return {
+            "workflow_id": self.workflow_id,
+            "tool_calls": dict(self.tool_calls),
+            "tool_errors": dict(self.tool_errors),
+            "tool_seconds": {k: round(v, 3) for k, v in self.tool_seconds.items()},
+            "tool_items": dict(self.tool_items),
+            "candidates_reviewed": self.candidates_reviewed,
+            "accepted": self.accepted,
+            "rejected": self.rejected,
+            "pending_approval": self.pending_approval,
+            "llm_calls": self.llm_calls,
+            "llm_tokens_in": self.llm_tokens_in,
+            "llm_tokens_out": self.llm_tokens_out,
+            "latency_seconds": self.latency_seconds,
+            "estimated_cost_usd": self.estimated_cost_usd,
+            "accept_rate": round(self.accepted / self.candidates_reviewed, 4) if self.candidates_reviewed else 0.0,
+            "tool_error_rate": round(
+                sum(self.tool_errors.values()) / max(1, sum(self.tool_calls.values())), 4
+            ),
+        }
 
 
 class MetricsCollector:
