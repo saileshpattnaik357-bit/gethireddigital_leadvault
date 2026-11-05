@@ -174,6 +174,10 @@ class ToolGateway:
     def list_tools(self) -> list[dict[str, Any]]:
         return [spec.as_dict() for spec in self.specs.values()]
 
+    def is_url_allowed(self, url: str) -> bool:
+        ok, _ = _is_public_http_url(url)
+        return ok
+
     def invoke(
         self,
         tool_id: str,
