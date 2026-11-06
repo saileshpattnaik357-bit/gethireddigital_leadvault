@@ -1023,3 +1023,196 @@ button, input, textarea, select {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ==========================================================================
+   AGENTIC AI PILLARS STYLES (RAG, EVALS, GUARDRAILS, CLAY GRID)
+   ========================================================================== */
+
+/* Clay-style Avatar */
+.company-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.company-avatar.accent-blue { background: linear-gradient(135deg, #0284c7, #0369a1); }
+.company-avatar.accent-purple { background: linear-gradient(135deg, #7c3aed, #6d28d9); }
+.company-avatar.accent-emerald { background: linear-gradient(135deg, #059669, #047857); }
+.company-avatar.accent-amber { background: linear-gradient(135deg, #d97706, #b45309); }
+
+/* Deal Value Tag */
+.deal-value-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+/* Match Score Meter */
+.match-score-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-score-bar-bg {
+  width: 54px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.match-score-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #38bdf8, #10b981);
+}
+
+.match-score-text {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #f8fafc;
+}
+
+/* SSRF Security Sandbox */
+.ssrf-sandbox-box {
+  background: #090d14;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  border-radius: 14px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.ssrf-test-input-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.verdict-badge.blocked {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+}
+
+.verdict-badge.allowed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+/* Evals Benchmark Card */
+.eval-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.eval-metric-box {
+  background: rgba(15, 22, 33, 0.8);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.eval-metric-num {
+  font-size: 32px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: #38bdf8;
+  margin-bottom: 4px;
+}
+
+.eval-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* RAG Vector Simulator */
+.vector-chunk-card {
+  background: rgba(22, 32, 48, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.vector-chunk-card:hover {
+  border-color: var(--border-light);
+}
+
+.vector-chunk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.similarity-pill {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent-blue);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+/* Heuristic Weight Slider */
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.slider-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.slider-input {
+  width: 100%;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
