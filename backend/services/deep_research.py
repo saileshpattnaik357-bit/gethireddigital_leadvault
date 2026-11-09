@@ -49,7 +49,7 @@ class DeepResearchEngine:
 
     def __init__(self) -> None:
         self.funding_regex = re.compile(
-            r"(?:raised|secures?|closed|series\s+[a-e]|seed|funding\s+of)\s*[\$€£]?\s*([0-9]+(?:\.[0-9]+)?\s*[mbkMBK]?)",
+            r"(?:raised|secur(?:ed|es?)|closed|series\s+[a-e]|seed|funding\s+of)\s*[\$€£]?\s*([0-9]+(?:\.[0-9]+)?\s*[mbkMBK]?)",
             re.IGNORECASE,
         )
         self.leadership_regex = re.compile(

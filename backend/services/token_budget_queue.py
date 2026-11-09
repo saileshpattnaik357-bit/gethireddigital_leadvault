@@ -7,6 +7,7 @@ token usage telemetry, cost estimation in USD, and strict quota enforcement.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -120,7 +121,7 @@ class DistributedLeadQueue:
                 continue
 
             try:
-                if asyncio.iscoroutinefunction(worker_fn):
+                if inspect.iscoroutinefunction(worker_fn):
                     res = await worker_fn(item)
                 else:
                     res = worker_fn(item)
