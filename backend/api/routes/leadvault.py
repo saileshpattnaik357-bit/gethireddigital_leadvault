@@ -9,6 +9,7 @@ from services.webhook_dispatcher import webhook_dispatcher
 from services.deep_research import DeepResearchEngine
 from services.token_budget_queue import DistributedLeadQueue
 from services.closed_loop_os import ClosedLoopOperatingSystem
+from services.storage_engine import storage_engine
 
 deep_research_engine = DeepResearchEngine()
 token_lead_queue = DistributedLeadQueue()
@@ -643,3 +644,40 @@ def record_crm_stage_loop(req: CRMLoopEventRequest):
         feedback=req.feedback,
     )
     return res
+
+
+# --- Relational Storage Engine (SQLite WAL) Endpoints ---
+
+@router.get("/storage/stats")
+def get_storage_stats():
+    conn = storage_engine._get_connection()
+    tables = ["tenants", "leadvault_specs", "leads", "hermes_conversions", "audit_logs", "webhooks"]
+    counts: dict[str, int] = {}
+    for t in tables:
+        try:
+            row = conn.execute(f"SELECT COUNT(*) as c FROM {t}").fetchone()
+            counts[t] = row["c"]
+        except Exception:
+            counts[t] = 0
+    wal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+    return {
+        "status": "ONLINE",
+        "journal_mode": str(wal_mode).upper(),
+        "database_file": str(storage_engine.db_path),
+        "table_row_counts": counts,
+    }
+
+
+@router.get("/storage/tenants")
+def get_storage_tenants():
+    return storage_engine.list_tenants()
+
+
+@router.get("/storage/leads")
+def get_storage_leads(tenant_id: str = "default", tier: str | None = None, limit: int = 100):
+    return storage_engine.list_leads(tenant_id=tenant_id, tier=tier, limit=limit)
+
+
+@router.get("/storage/audit-logs")
+def get_storage_audit_logs(limit: int = 50):
+    return storage_engine.get_recent_audit_logs(limit=limit)

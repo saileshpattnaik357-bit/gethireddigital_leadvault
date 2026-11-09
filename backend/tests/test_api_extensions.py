@@ -76,3 +76,20 @@ class TestApiExtensions:
         assert mesh_data["total_candidates_processed"] == 1
         assert len(mesh_data["qualified_leads"]) == 1
         assert len(mesh_data["handoff_trace"]) >= 4
+
+    def test_storage_stats_and_query_endpoints(self):
+        resp = client.get("/api/leadvault/storage/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ONLINE"
+        assert data["journal_mode"] == "WAL"
+        assert "table_row_counts" in data
+        assert "tenants" in data["table_row_counts"]
+
+        tenants_resp = client.get("/api/leadvault/storage/tenants")
+        assert tenants_resp.status_code == 200
+        assert isinstance(tenants_resp.json(), list)
+
+        leads_resp = client.get("/api/leadvault/storage/leads?tenant_id=default")
+        assert leads_resp.status_code == 200
+        assert isinstance(leads_resp.json(), list)
