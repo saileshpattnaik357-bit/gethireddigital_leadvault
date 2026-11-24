@@ -1,26 +1,29 @@
+from datetime import datetime, timedelta, timezone
+
 from backend.services.deep_research import DeepResearchEngine
 
 
 def test_deep_research_detection():
     engine = DeepResearchEngine()
+    now = datetime.now(timezone.utc)
     docs = [
         {
             "text": "Acme Corp recently raised Series B funding of $35M to expand its enterprise footprint.",
             "source": "TechCrunch",
             "url": "https://techcrunch.com/acme-series-b",
-            "timestamp_utc": "2026-11-05T12:00:00Z",
+            "timestamp_utc": (now - timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         {
             "text": "Acme welcomes Sarah Miller as new VP Procurement to spearhead external vendor partnerships.",
             "source": "LinkedIn",
             "url": "https://linkedin.com/posts/sarah-miller-acme",
-            "timestamp_utc": "2026-11-06T08:00:00Z",
+            "timestamp_utc": (now - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         {
             "text": "We are migrating to Snowflake and rebuilding our analytics pipeline. Seeking implementation partner RFP.",
             "source": "Reddit",
             "url": "https://reddit.com/r/dataengineering/comments/123",
-            "timestamp_utc": "2026-11-06T09:00:00Z",
+            "timestamp_utc": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
     ]
 
