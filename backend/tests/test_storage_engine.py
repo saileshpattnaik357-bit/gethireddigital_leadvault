@@ -72,3 +72,4 @@ def test_storage_engine_crud():
         logs = engine.get_recent_audit_logs(limit=5)
         assert len(logs) >= 1
         assert logs[0]["action"] == "CLASSIFY_INTENT"
+        engine.close()

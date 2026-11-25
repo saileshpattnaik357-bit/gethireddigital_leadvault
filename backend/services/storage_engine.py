@@ -8,12 +8,13 @@ and transparent compatibility with runtime JSON archives.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 DB_PATH = Path("backend/runtime/leadvault_enterprise.db")
 
@@ -29,6 +30,11 @@ class StorageEngine:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
                 cls._instance._init_db(db_path)
+                return cls._instance
+            if db_path != cls._instance.db_path:
+                inst = super().__new__(cls)
+                inst._init_db(db_path)
+                return inst
             return cls._instance
 
     def _init_db(self, db_path: Path) -> None:
@@ -47,6 +53,12 @@ class StorageEngine:
             conn.execute("PRAGMA foreign_keys = ON;")
             self._local.conn = conn
         return self._local.conn
+
+    def close(self) -> None:
+        """Close the thread-local SQLite connection if open."""
+        if hasattr(self, "_local") and getattr(self._local, "conn", None) is not None:
+            self._local.conn.close()
+            self._local.conn = None
 
     def _bootstrap_schema(self) -> None:
         conn = self._get_connection()
@@ -346,6 +358,16 @@ class StorageEngine:
                 (now, tenant_id, agent_id, action, status, json.dumps(details)),
             )
 
+    def health_check(self) -> Dict[str, Any]:
+        """Verify SQLite WAL connectivity."""
+        conn = self._get_connection()
+        row = conn.execute("SELECT 1 AS ok;").fetchone()
+        return {
+            "backend": "sqlite",
+            "status": "healthy" if row and row["ok"] == 1 else "degraded",
+            "rls_enforced": False,
+        }
+
     def get_recent_audit_logs(self, limit: int = 50) -> List[Dict[str, Any]]:
         conn = self._get_connection()
         cursor = conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?;", (limit,))
@@ -365,4 +387,17 @@ class StorageEngine:
         return results
 
 
-storage_engine = StorageEngine()
+def get_storage_engine(
+    db_url: Optional[str] = None,
+    db_path: Path = DB_PATH,
+) -> Union[StorageEngine, Any]:
+    """Pluggable storage factory routing PostgreSQL/Neon URIs or SQLite WAL fallback."""
+    resolved_url = (db_url if db_url is not None else os.getenv("DATABASE_URL", "")).strip()
+    if resolved_url.startswith(("postgresql://", "postgres://")):
+        from backend.services.postgres_engine import PostgresStorageEngine
+
+        return PostgresStorageEngine(resolved_url)
+    return StorageEngine(db_path=db_path)
+
+
+storage_engine = get_storage_engine()
